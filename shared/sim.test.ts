@@ -15,8 +15,10 @@ test("fills at the NEXT candle open and sizes by risk (1% of 1000 = $10 over a $
   assert.ok(s.pending);
   stepCandle(s, c(1, 100, 100.4, 99.6, 100.2), () => null, cfg);
   assert.ok(s.position);
-  assert.ok(Math.abs(s.position!.units - 10) < 1e-9);
-  assert.ok(Math.abs(s.position!.risk - 10) < 1e-9);
+  // TypeScript cannot infer mutations performed inside stepCandle; assert the runtime state, then narrow explicitly.
+  const opened = s.position as unknown as { units: number; risk: number };
+  assert.ok(Math.abs(opened.units - 10) < 1e-9);
+  assert.ok(Math.abs(opened.risk - 10) < 1e-9);
 });
 
 test("target hit books a +2R win", () => {
