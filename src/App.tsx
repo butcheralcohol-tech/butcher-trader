@@ -1,60 +1,71 @@
-import { useEffect, useMemo, useState } from "react";
-import { Activity, ArrowDownRight, ArrowUpRight, ShieldCheck, Radio, Crosshair, LockKeyhole, RefreshCw, Zap } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Activity, ArrowDownRight, ArrowUpRight, Crosshair, FileText, LockKeyhole, Radio, ShieldCheck } from "lucide-react";
+import { ema } from "../shared/indicators.js";
+import { GRANULARITIES } from "../shared/candles.js";
+import CandleChart, { type Marker } from "./components/CandleChart";
+import PaperTrading from "./components/PaperTrading";
+import RiskPanel from "./components/RiskPanel";
+import StrategyLab from "./components/StrategyLab";
+import { usePaper } from "./hooks/usePaper";
+import { useLiveFeed } from "./hooks/useLiveFeed";
+import { clockSeconds, fmt } from "./lib/format";
+import { MARKETS } from "./lib/markets";
 
-type Tick = { quote: number; epoch: number; symbol: string };
-const markets = [
-  { symbol: "R_100", name: "Volatility 100 Index", group: "SYNTHETIC" },
-  { symbol: "R_75", name: "Volatility 75 Index", group: "SYNTHETIC" },
-  { symbol: "frxEURUSD", name: "EUR / USD", group: "FOREX" },
-  { symbol: "frxGBPUSD", name: "GBP / USD", group: "FOREX" },
-];
-const fmt = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+type View = "overview" | "lab" | "paper" | "risk";
+const titles: Record<View, string> = { overview: "Control room", lab: "Strategy lab", paper: "Paper trading", risk: "Risk controls" };
 
 export default function App() {
-  const [selected, setSelected] = useState("R_100");
-  const [tick, setTick] = useState<Tick | null>(null);
-  const [status, setStatus] = useState("CONNECTING");
-  const [risk, setRisk] = useState({ balance: "1000", riskPercent: "0.5", dailyLossLimitPercent: "2", dailyPnl: "0" });
-  const [riskResult, setRiskResult] = useState<{ allowed: boolean; reasons: string[]; maxRiskAmount: number } | null>(null);
-  const [apiHealth, setApiHealth] = useState("CHECKING");
-  const [history, setHistory] = useState<number[]>([]);
-  const market = markets.find(m => m.symbol === selected)!;
-  const change = useMemo(() => history.length > 1 ? ((history.at(-1)! - history[0]) / history[0]) * 100 : 0, [history]);
-
-  useEffect(() => { fetch("/api/health").then(r => r.json()).then(() => setApiHealth("ONLINE")).catch(() => setApiHealth("OFFLINE")); }, []);
-  useEffect(() => {
-    setTick(null); setHistory([]); setStatus("CONNECTING");
-    const appId = import.meta.env.VITE_DERIV_APP_ID || "1089";
-    const socket = new WebSocket(`wss://ws.derivws.com/websockets/v3?app_id=${encodeURIComponent(appId)}`);
-    socket.onopen = () => { setStatus("LIVE FEED"); socket.send(JSON.stringify({ ticks: selected, subscribe: 1 })); };
-    socket.onmessage = event => {
-      try { const msg = JSON.parse(event.data); if (msg.tick) { const next = Number(msg.tick.quote); setTick({ quote: next, epoch: Number(msg.tick.epoch), symbol: selected }); setHistory(prev => [...prev, next].slice(-30)); } if (msg.error) setStatus("FEED ERROR"); } catch { setStatus("FEED ERROR"); }
-    };
-    socket.onerror = () => setStatus("RECONNECT NEEDED");
-    socket.onclose = () => setStatus(prev => prev === "LIVE FEED" ? "DISCONNECTED" : prev);
-    return () => socket.close();
-  }, [selected]);
-
-  async function checkRisk() {
-    try {
-      const response = await fetch("/api/risk/check", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ balance: Number(risk.balance), riskPercent: Number(risk.riskPercent), dailyLossLimitPercent: Number(risk.dailyLossLimitPercent), dailyPnl: Number(risk.dailyPnl), openPositions: 0, maxOpenPositions: 1, liveEnabled: false }) });
-      setRiskResult(await response.json());
-    } catch { setRiskResult({ allowed: false, reasons: ["Risk API unavailable. Fail-closed: no trade."], maxRiskAmount: 0 }); }
-  }
+  const [view, setView] = useState<View>("overview");
+  const paper = usePaper();
+  const nav = (id: View, label: string, icon: JSX.Element, badge?: string) =>
+    <button key={id} className={`nav-item ${view === id ? "active" : ""}`} onClick={() => setView(id)}>{icon} {label}{badge ? <span className="soon">{badge}</span> : view === id ? <span className="nav-dot" /> : null}</button>;
 
   return <div className="app-shell">
-    <aside className="sidebar"><div className="brand"><div className="brand-mark">B<span>×</span></div><div><b>BUTCHER</b><small>TRADER / SYSTEM 01</small></div></div>
-      <div className="side-label">WORKSPACE</div><div className="nav-item active"><Activity size={17}/> Overview <span className="nav-dot"/></div><div className="nav-item"><Crosshair size={17}/> Strategy lab <span className="soon">SOON</span></div><div className="nav-item"><ShieldCheck size={17}/> Risk controls</div>
-      <div className="side-bottom"><div className="status-led"/><div><b>DEMO PROTOCOL</b><small>LIVE ORDERS DISABLED</small></div></div></aside>
-    <main className="main"><header className="topbar"><div><div className="eyebrow">TRADING INTELLIGENCE / OVERVIEW</div><h1>Control room<span>.</span></h1></div><div className="top-actions"><span className="demo-badge"><span/> DEMO MODE</span><div className="avatar">BT</div></div></header>
-      <section className="hero"><div className="hero-grid"/><div className="hero-copy"><div className="eyebrow red">DISCIPLINE OVER IMPULSE</div><h2>Stay sharp.<br/><em>Protect capital.</em></h2><p>A demo-first trading workspace. Signals are observations, not guarantees. Every order must pass the risk gate.</p><div className="hero-tags"><span><LockKeyhole size={13}/> LIVE EXECUTION LOCKED</span><span><ShieldCheck size={13}/> RISK GATE ACTIVE</span></div></div><div className="hero-emblem"><div className="emblem-ring"><span>B</span></div><div className="emblem-caption">PRECISION / PATIENCE / PROCESS</div></div></section>
-      <div className="section-heading"><div><div className="eyebrow">01 / MARKET INTELLIGENCE</div><h3>Market watch</h3></div><div className="feed-status"><span className={status === "LIVE FEED" ? "pulse" : "pulse muted"}/>{status}</div></div>
-      <section className="market-layout"><div className="market-list">{markets.map(m => <button key={m.symbol} onClick={() => setSelected(m.symbol)} className={`market-row ${selected === m.symbol ? "chosen" : ""}`}><div className="market-icon">{m.group === "FOREX" ? "FX" : "V"}</div><div className="market-name"><b>{m.name}</b><small>{m.symbol} · {m.group}</small></div><div className="market-arrow">{selected === m.symbol ? <ArrowUpRight size={16}/> : <ArrowDownRight size={16}/>}</div></button>)}</div>
-        <div className="price-panel"><div className="price-top"><div><span className="tiny-label">SELECTED INSTRUMENT</span><h4>{market.name}</h4><small>{market.symbol}</small></div><span className="live-chip"><Radio size={12}/> STREAM</span></div><div className="price-value">{tick ? fmt(tick.quote) : "— — —"}</div><div className={`price-change ${change >= 0 ? "up" : "down"}`}>{change >= 0 ? <ArrowUpRight size={16}/> : <ArrowDownRight size={16}/>} {history.length > 1 ? `${Math.abs(change).toFixed(3)}%` : "Collecting ticks"} <span>· recent feed movement</span></div><div className="chart">{history.length > 1 ? <svg viewBox="0 0 600 115" preserveAspectRatio="none" aria-label="Recent price movement"><polyline points={history.map((v, i) => `${i * (600 / (history.length - 1))},${100 - ((v - Math.min(...history)) / (Math.max(...history) - Math.min(...history) || 1)) * 80}`).join(" ")} fill="none" stroke="currentColor" strokeWidth="2.5" vectorEffect="non-scaling-stroke"/></svg> : <div className="chart-empty"><Activity size={20}/> Waiting for market ticks</div>}</div><div className="chart-footer"><span>LIVE QUOTE <b>{tick ? new Date(tick.epoch * 1000).toLocaleTimeString() : "Waiting…"}</b></span><span>NO ORDERS PLACED</span></div></div></section>
-      <div className="section-heading lower"><div><div className="eyebrow">02 / CAPITAL PRESERVATION</div><h3>Risk engine</h3></div><span className="safe-label"><ShieldCheck size={14}/> CONSERVATIVE PRESET</span></div>
-      <section className="risk-grid"><div className="risk-card"><div className="card-title"><ShieldCheck size={18}/><b>Pre-trade risk gate</b><span className="card-status">ACTIVE</span></div><p>Set demo account assumptions. The backend validates limits before any future strategy can request a trade.</p><div className="fields"><label>Demo balance (USD)<input type="number" min="1" value={risk.balance} onChange={e => setRisk({...risk, balance:e.target.value})}/></label><label>Risk per trade (%)<input type="number" min="0.1" max="1" step="0.1" value={risk.riskPercent} onChange={e => setRisk({...risk, riskPercent:e.target.value})}/></label><label>Daily loss lock (%)<input type="number" min="0.1" max="3" step="0.1" value={risk.dailyLossLimitPercent} onChange={e => setRisk({...risk, dailyLossLimitPercent:e.target.value})}/></label><label>Demo daily P&amp;L ($)<input type="number" max="0" value={risk.dailyPnl} onChange={e => setRisk({...risk, dailyPnl:e.target.value})}/></label></div><button className="primary-btn" onClick={checkRisk}><RefreshCw size={15}/> Run risk check</button>{riskResult && <div className={`risk-result ${riskResult.allowed ? "pass" : "blocked"}`}><b>{riskResult.allowed ? "GATE PASSED — DEMO ONLY" : "TRADE BLOCKED"}</b><span>Max planned risk: ${fmt(riskResult.maxRiskAmount)}</span>{riskResult.reasons.map(r => <small key={r}>{r}</small>)}</div>}</div>
-        <div className="stats-column"><div className="stat-card"><div className="stat-icon"><Zap size={17}/></div><div><small>EXECUTION MODE</small><b>DEMO ONLY</b><span>Live execution not implemented</span></div><div className="stat-lock"><LockKeyhole size={16}/></div></div><div className="stat-card"><div className="stat-icon"><ShieldCheck size={17}/></div><div><small>BACKEND STATUS</small><b>{apiHealth}</b><span>Serverless API · Vercel</span></div><div className={`status-led ${apiHealth === "ONLINE" ? "" : "off"}`}/></div><div className="warning-note"><b>Risk notice</b><p>Derivatives and synthetic indices are high risk. A passing gate is not a trade recommendation and does not predict outcomes. Test strategies on demo data before considering live use.</p></div></div></section>
-      <footer><span>BUTCHER TRADER <b>·</b> BUILD 0.1.0</span><span>STAY DISCIPLINED. NO GUARANTEED RETURNS.</span></footer>
+    <aside className="sidebar"><div className="brand"><div className="brand-mark">B<span>×</span></div><div><b>BUTCHER</b><small>TRADER / SYSTEM 02</small></div></div>
+      <div className="side-label">WORKSPACE</div>
+      {nav("overview", "Overview", <Activity size={17} />)}
+      {nav("lab", "Strategy lab", <Crosshair size={17} />)}
+      {nav("paper", "Paper trading", <FileText size={17} />, paper.session ? "LIVE" : undefined)}
+      {nav("risk", "Risk controls", <ShieldCheck size={17} />)}
+      <div className="side-bottom"><div className="status-led" /><div><b>DEMO PROTOCOL</b><small>LIVE ORDERS DISABLED</small></div></div></aside>
+    <main className="main"><header className="topbar"><div><div className="eyebrow">TRADING INTELLIGENCE / {view.toUpperCase()}</div><h1>{titles[view]}<span>.</span></h1></div><div className="top-actions"><span className="demo-badge"><span /> DEMO MODE</span><div className="avatar">BT</div></div></header>
+      <nav className="mobile-nav" aria-label="Sections">{(Object.keys(titles) as View[]).map(id => <button key={id} className={view === id ? "on" : ""} onClick={() => setView(id)}>{titles[id]}</button>)}</nav>
+      {view === "overview" && <Overview />}
+      {view === "lab" && <StrategyLab />}
+      {view === "paper" && <PaperTrading paper={paper} />}
+      {view === "risk" && <><div className="section-heading"><div><div className="eyebrow">02 / CAPITAL PRESERVATION</div><h3>Risk engine</h3></div><span className="safe-label"><ShieldCheck size={14} /> CONSERVATIVE PRESET</span></div><RiskPanel /></>}
+      <footer><span>BUTCHER TRADER <b>·</b> BUILD 0.2.0</span><span>STAY DISCIPLINED. NO GUARANTEED RETURNS.</span></footer>
     </main>
   </div>;
+}
+
+function Overview() {
+  const [selected, setSelected] = useState<string>("R_100");
+  const [granularity, setGranularity] = useState(60);
+  const { candles, info } = useLiveFeed(selected, granularity, 300);
+  const market = MARKETS.find(m => m.symbol === selected)!;
+  const last = candles[candles.length - 1];
+  const change = candles.length > 1 ? ((last.close - candles[0].open) / candles[0].open) * 100 : 0;
+  const overlays = useMemo(() => {
+    const closes = candles.map(c => c.close);
+    return [{ label: "EMA 9", color: "#e5a344", values: ema(closes, 9) }, { label: "EMA 21", color: "#6aa7ff", values: ema(closes, 21) }];
+  }, [candles]);
+  const markers: Marker[] = [];
+  const live = info.status === "LIVE";
+
+  return <>
+    <section className="hero"><div className="hero-grid" /><div className="hero-copy"><div className="eyebrow red">DISCIPLINE OVER IMPULSE</div><h2>Stay sharp.<br /><em>Protect capital.</em></h2><p>A demo-first trading workspace. Signals are observations, not guarantees. Every order must pass the risk gate.</p><div className="hero-tags"><span><LockKeyhole size={13} /> LIVE EXECUTION LOCKED</span><span><ShieldCheck size={13} /> RISK GATE ACTIVE</span></div></div><div className="hero-emblem"><div className="emblem-ring"><span>B</span></div><div className="emblem-caption">PRECISION / PATIENCE / PROCESS</div></div></section>
+    <div className="section-heading"><div><div className="eyebrow">01 / MARKET INTELLIGENCE</div><h3>Market watch</h3></div><div className="feed-status"><span className={live ? "pulse" : "pulse muted"} />{info.status}{info.lastDataAt ? ` · updated ${clockSeconds(info.lastDataAt)}` : ""}</div></div>
+    <section className="market-layout"><div className="market-list">{MARKETS.map(m => <button key={m.symbol} onClick={() => setSelected(m.symbol)} className={`market-row ${selected === m.symbol ? "chosen" : ""}`}><div className="market-icon">{m.group === "FOREX" ? "FX" : "V"}</div><div className="market-name"><b>{m.name}</b><small>{m.symbol} · {m.group}</small></div><div className="market-arrow">{selected === m.symbol ? <ArrowUpRight size={16} /> : <ArrowDownRight size={16} />}</div></button>)}</div>
+      <div className="price-panel"><div className="price-top"><div><span className="tiny-label">SELECTED INSTRUMENT</span><h4>{market.name}</h4><small>{market.symbol}</small></div>
+        <div className="tf-switch" role="group" aria-label="Timeframe">{GRANULARITIES.map(g => <button key={g.seconds} className={granularity === g.seconds ? "on" : ""} onClick={() => setGranularity(g.seconds)}>{g.label}</button>)}</div>
+        <span className="live-chip"><Radio size={12} /> {live ? "STREAM" : "OFFLINE"}</span></div>
+        <div className="price-value">{last ? fmt(last.close) : "— — —"}</div>
+        <div className={`price-change ${change >= 0 ? "up" : "down"}`}>{change >= 0 ? <ArrowUpRight size={16} /> : <ArrowDownRight size={16} />} {candles.length > 1 ? `${Math.abs(change).toFixed(3)}%` : "Collecting candles"} <span>· over the {candles.length} candles shown</span></div>
+        <CandleChart candles={candles} overlays={overlays} markers={markers} />
+        {!live && <div className="feed-note">{info.message}{market.group === "FOREX" ? " Forex markets are closed on weekends; synthetic indices trade 24/7." : ""}</div>}
+        <div className="chart-footer"><span>LAST CANDLE <b>{last ? new Date(last.time * 1000).toLocaleTimeString("en-GB", { hour12: false }) : "Waiting…"}</b></span><span>NO ORDERS PLACED</span></div></div></section>
+    <div className="section-heading lower"><div><div className="eyebrow">02 / CAPITAL PRESERVATION</div><h3>Risk engine</h3></div><span className="safe-label"><ShieldCheck size={14} /> CONSERVATIVE PRESET</span></div>
+    <RiskPanel />
+  </>;
 }

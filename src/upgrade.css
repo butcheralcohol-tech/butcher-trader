@@ -1,0 +1,39 @@
+/* v0.2 additions — same black/crimson palette as styles.css */
+button.nav-item{background:none;border:1px solid transparent;width:100%;text-align:left;font:inherit;font-size:12px;cursor:pointer}
+button.nav-item:hover{color:#fff}button.nav-item.active{background:#1b1114;border-color:#3a1b20}
+.mobile-nav{display:none;gap:6px;overflow-x:auto;margin:-8px 0 18px;padding-bottom:4px}
+.mobile-nav button{flex:none;background:#101013;color:#9a9aa2;border:1px solid #2a2a30;padding:9px 12px;font:10px "DM Mono";cursor:pointer}
+.mobile-nav button.on{color:#fff;border-color:#e1323b;background:#1b1114}
+.tf-switch{display:flex;gap:4px}.tf-switch button{background:#121216;color:#8a8a92;border:1px solid #2a2a30;padding:5px 8px;font:9px "DM Mono";cursor:pointer}
+.tf-switch button.on{color:#fff;border-color:#a7343b;background:#1b1114}
+.candle-wrap{margin-top:10px;width:100%;overflow:hidden}.candle-wrap svg{display:block;max-width:100%}
+.ohlc-line{display:flex;flex-wrap:wrap;gap:12px;font:9px "DM Mono";color:#74747c;margin-bottom:6px}.ohlc-line b{color:#c4c4cb;font-weight:500}
+.chart-empty.tall{display:flex;align-items:center;justify-content:center;color:#55555d;font-size:10px}
+.feed-note{font:9px "DM Mono";color:#e5a344;background:#17130e;border:1px solid #49351f;padding:8px 10px;margin:8px 0}
+.lab{display:flex;flex-direction:column;gap:13px}.lab>.section-heading{margin:4px 0 0}
+.panel{border:1px solid #242429;background:#0d0d10;padding:18px 20px}
+.panel .card-title{margin-bottom:12px}.card-title.spaced{margin-top:18px}
+.panel select,.fields select{background:#151518;border:1px solid #323238;border-radius:2px;color:#eee;padding:10px 8px;font:11px "DM Mono";width:100%;min-width:0;outline:none}
+.fields.four{grid-template-columns:repeat(4,minmax(0,1fr))}.fields.six{grid-template-columns:repeat(4,minmax(0,1fr))}
+.fields label .primary-btn{width:100%}
+.hint{font-size:10px;color:#898991;line-height:1.7;margin:8px 0}
+.btn-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
+.primary-btn:disabled,.ghost-btn:disabled{opacity:.45;cursor:not-allowed}
+.ghost-btn{display:inline-flex;align-items:center;gap:7px;background:transparent;color:#d8d8de;border:1px solid #38383f;padding:10px 13px;font:700 10px Manrope;cursor:pointer}
+.ghost-btn:hover:not(:disabled){border-color:#a7343b;color:#fff}.ghost-btn.small{padding:5px 8px;font-size:9px}.ghost-btn.danger:hover{background:#211114}
+.verdict{font-size:11px;line-height:1.6;padding:11px 13px;margin-bottom:12px;border:1px solid #49351f;background:#17130e;color:#e6b16a}
+.verdict.ok{border-color:#295b45;background:#102019;color:#8de5b8}
+.equity-wrap{margin:6px 0 14px}.equity-wrap svg{width:100%;height:120px;color:#e0444e;background:#0a0a0c;border:1px solid #1d1d22}
+.equity-axis{display:flex;justify-content:space-between;font:8px "DM Mono";color:#6d6d75;margin-top:5px}.amber{color:#e5a344}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.metrics-card{border:1px solid #1f1f24;padding:12px}.metrics-head{display:flex;justify-content:space-between;gap:10px;margin-bottom:10px;font-size:11px}.metrics-head span{font:8px "DM Mono";color:#74747c;text-align:right}
+.metrics-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.metric{display:flex;flex-direction:column;gap:5px;min-width:0}.metric small{font:8px "DM Mono";color:#777780;letter-spacing:.8px}.metric b{font:500 13px "DM Mono";overflow-wrap:anywhere}
+.up{color:#5cd59c}.down{color:#ed6069}
+.table-wrap{overflow:auto;max-height:340px;border:1px solid #1d1d22}.table-wrap.tall{max-height:460px}
+table{width:100%;border-collapse:collapse;font:10px "DM Mono"}th,td{padding:8px 10px;text-align:left;border-bottom:1px solid #1b1b20;white-space:nowrap}
+td:last-child{white-space:normal}th{position:sticky;top:0;background:#111115;color:#777780;font-weight:500;font-size:8px;letter-spacing:.8px}
+.tag{padding:2px 6px;border:1px solid #333339;font-size:8px;color:#aaa}.tag.signal{color:#6aa7ff;border-color:#25406b}.tag.filled{color:#e5a344;border-color:#49351f}
+.tag.exit{color:#5cd59c;border-color:#295b45}.tag.gate_blocked,.tag.skipped{color:#ed6069;border-color:#5b282d}
+@media(max-width:950px){.fields.four,.fields.six{grid-template-columns:repeat(2,minmax(0,1fr))}.two-col{grid-template-columns:1fr}.price-top{flex-wrap:wrap;gap:8px}}
+@media(max-width:650px){.mobile-nav{display:flex}.fields.four,.fields.six{grid-template-columns:1fr}.metrics-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.panel{padding:14px}}

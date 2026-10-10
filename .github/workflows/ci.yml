@@ -10,7 +10,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
       - run: npm install
       - run: npm test
       - run: npm run typecheck
       - run: npm run build
+      - name: Dependency audit (informational)
+        run: npm audit --audit-level=high
+        continue-on-error: true
