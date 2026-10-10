@@ -8,8 +8,9 @@
     "dev:client": "vite --host 0.0.0.0",
     "dev:server": "tsx watch server/index.ts",
     "build": "tsc -b && vite build",
-    "start": "node dist-server/index.js",
-    "typecheck": "tsc --noEmit"
+    "start": "tsx server/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test server/*.test.ts"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
