@@ -60,3 +60,14 @@ Research starter, not financial advice or a profitable-strategy claim. Risk limi
 5. Demo signal lifecycle and audit log. Done (browser-local; a server-side durable log is still to do).
 6. Persistent worker for unattended paper trading (separate host, durable storage, monitoring).
 7. Security review before any separately gated live mode.
+
+
+## Daily maintenance and Deriv compatibility checks
+
+- GitHub Actions runs `.github/workflows/deriv-daily-maintenance.yml` every day at 06:17 UTC (and can be started manually from Actions).
+- The workflow connects to Deriv's public WebSocket and requests recent `R_100` candles, validating the response shape used by the market feed. A failed check marks the workflow failed; it does not change trading behavior.
+- Compatible npm dependency updates are tested with `npm test`, `npm run typecheck`, and `npm run build`, then proposed in a pull request for review. No dependency update is auto-merged or automatically deployed.
+- Dependabot checks npm dependencies daily and GitHub Actions versions weekly, proposing separate pull requests.
+- Set the repository Actions variable `DERIV_APP_ID` to your registered public Deriv app ID if needed; the workflow otherwise uses the public-feed fallback ID. This check needs no account token.
+
+**Scope:** This is scheduled maintenance and API compatibility monitoring, not a system that can predict or automatically implement every Deriv API change. It does not rewrite the bot's strategies or risk limits, authenticate a trading account, or enable real-money trading. Review API-change alerts and update code deliberately when Deriv changes its protocol. Keep demo testing and the existing live-trading lock in place.
