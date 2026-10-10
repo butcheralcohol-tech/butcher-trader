@@ -17,3 +17,40 @@
 /* Strategy bot library */
 .bot-library{margin:0 0 18px}.bot-library-head{display:flex;align-items:end;justify-content:space-between;margin:18px 0 12px}.bot-library-head h3{font-size:17px;margin:5px 0 0}.bot-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.bot-card{background:linear-gradient(145deg,#111114,#0c0c0f);border:1px solid #29292e;padding:16px;min-width:0}.bot-card.selected{border-color:#7c2b32;box-shadow:inset 0 0 0 1px #421b20}.bot-card-top{display:flex;justify-content:space-between;align-items:center}.bot-number,.bot-mode{font:8px "DM Mono";letter-spacing:1px;color:#e34b55}.bot-mode{color:#65d5a1;border:1px solid #234535;padding:4px 6px}.bot-card h4{font-size:13px;margin:12px 0 7px}.bot-card p{font-size:10px;color:#93939b;line-height:1.7;min-height:50px;margin:0 0 13px}.bot-card-foot{display:flex;align-items:center;justify-content:space-between;gap:8px;border-top:1px solid #242429;padding-top:11px}.bot-card-foot>span{font:8px "DM Mono";color:#72727a}.bot-card-foot .ghost-btn{white-space:nowrap}.bot-library>.hint{margin-top:10px}
 @media(max-width:700px){.bot-cards{grid-template-columns:1fr}.bot-library-head{align-items:start;gap:10px;flex-wrap:wrap}.bot-card p{min-height:0}}
+
+
+/* Manual virtual trading desk and Deriv account setup */
+.panel{border:1px solid #242429;background:#0d0d10;padding:19px;margin-bottom:13px}
+.manual-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(260px,.85fr);gap:22px}
+.manual-fields{grid-template-columns:repeat(3,minmax(0,1fr))}
+.manual-quote{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:13px;border:1px solid #28282d;background:#101013}
+.manual-quote>span{display:flex;flex-direction:column;gap:7px;min-width:0}
+.manual-quote small{font:8px "DM Mono";color:#777780;letter-spacing:.8px}
+.manual-quote b{display:flex;align-items:center;gap:5px;font:11px "DM Mono";overflow-wrap:anywhere}
+.manual-quote .metric-good{color:#5cd59c}.manual-quote .metric-wait{color:#e5a344}
+.manual-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.manual-actions button{display:flex;align-items:center;justify-content:center;gap:7px;padding:12px 8px;border:1px solid;font:700 10px Manrope;cursor:pointer}
+.manual-actions button:disabled{opacity:.35;cursor:not-allowed}
+.manual-buy{background:#102019;border-color:#295b45!important;color:#8de5b8}
+.manual-sell{background:#211114;border-color:#5b282d!important;color:#ff9299}
+.manual-chart{min-width:0;border:1px solid #242429;background:#0b0b0e;padding:13px}
+.manual-chart .chart{height:190px}
+.manual-chart .card-title{margin-bottom:14px}
+.account-connect{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.account-icon{height:48px;width:48px;display:grid;place-items:center;border:1px solid #4a252b;background:#1a1012;color:#e44852;flex-shrink:0}
+.account-copy{flex:1;min-width:220px}
+.account-copy h3{font-size:14px;margin:0 0 8px}
+.account-copy p{font-size:10px;line-height:1.8;color:#96969e;margin:0 0 10px;max-width:620px}
+.connection-state{display:flex;align-items:center;gap:8px;font:9px "DM Mono";color:#e5a344}
+.connection-state .pulse{background:#e5a344}
+.ghost-btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;text-decoration:none}
+.setup-steps{list-style:none;counter-reset:setup;padding:0;margin:16px 0 0;display:grid;gap:0}
+.setup-steps li{counter-increment:setup;position:relative;padding:0 0 19px 43px;border-left:1px solid #393035;margin-left:13px;display:flex;flex-direction:column;gap:7px}
+.setup-steps li:last-child{border-left-color:transparent;padding-bottom:0}
+.setup-steps li:before{content:counter(setup,decimal-leading-zero);position:absolute;left:-14px;top:0;width:27px;height:27px;display:grid;place-items:center;background:#1b1114;border:1px solid #6b2930;color:#f16b73;font:9px "DM Mono"}
+.setup-steps li>b{font-size:11px;color:#e8e8eb}
+.setup-steps li>span{font-size:10px;line-height:1.8;color:#93939b}
+.setup-steps li>a{display:inline-flex;align-items:center;gap:6px;width:max-content;color:#f07178;text-decoration:none;font-size:10px}
+.setup-steps code{font:9px "DM Mono";color:#f3b0b4;background:#1a1113;padding:2px 4px}
+@media(max-width:950px){.manual-grid{grid-template-columns:1fr}.manual-chart .chart{height:160px}}
+@media(max-width:650px){.manual-fields{grid-template-columns:1fr}.manual-quote{gap:6px;padding:10px}.manual-quote b{font-size:9px}.manual-actions{grid-template-columns:1fr}.account-connect .ghost-btn{width:100%}}

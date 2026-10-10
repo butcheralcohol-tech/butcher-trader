@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
-import { Activity, ArrowDownRight, ArrowUpRight, Crosshair, FileText, LockKeyhole, Radio, ShieldCheck } from "lucide-react";
+import { Activity, ArrowDownRight, ArrowUpRight, Crosshair, FileText, KeyRound, LockKeyhole, Radio, ShieldCheck, SlidersHorizontal } from "lucide-react";
 import { ema } from "../shared/indicators.js";
 import { GRANULARITIES } from "../shared/candles.js";
 import CandleChart, { type Marker } from "./components/CandleChart";
 import PaperTrading from "./components/PaperTrading";
+import ManualTrading from "./components/ManualTrading";
+import DerivConnection from "./components/DerivConnection";
 import RiskPanel from "./components/RiskPanel";
 import StrategyLab from "./components/StrategyLab";
 import { usePaper } from "./hooks/usePaper";
@@ -11,8 +13,8 @@ import { useLiveFeed } from "./hooks/useLiveFeed";
 import { clockSeconds, fmt } from "./lib/format";
 import { MARKETS } from "./lib/markets";
 
-type View = "overview" | "lab" | "paper" | "risk";
-const titles: Record<View, string> = { overview: "Control room", lab: "Strategy lab", paper: "Paper trading", risk: "Risk controls" };
+type View = "overview" | "lab" | "paper" | "manual" | "account" | "risk";
+const titles: Record<View, string> = { overview: "Control room", lab: "Strategy lab", paper: "Paper trading", manual: "Manual desk", account: "Deriv connection", risk: "Risk controls" };
 
 export default function App() {
   const [view, setView] = useState<View>("overview");
@@ -25,7 +27,9 @@ export default function App() {
       <div className="side-label">WORKSPACE</div>
       {nav("overview", "Overview", <Activity size={17} />)}
       {nav("lab", "Strategy lab", <Crosshair size={17} />)}
-      {nav("paper", "Paper trading", <FileText size={17} />, paper.session ? "LIVE" : undefined)}
+      {nav("paper", "Paper trading", <FileText size={17} />, paper.session ? "RUN" : undefined)}
+      {nav("manual", "Manual desk", <SlidersHorizontal size={17} />)}
+      {nav("account", "Deriv connection", <KeyRound size={17} />)}
       {nav("risk", "Risk controls", <ShieldCheck size={17} />)}
       <div className="side-bottom"><div className="status-led" /><div><b>DEMO PROTOCOL</b><small>LIVE ORDERS DISABLED</small></div></div></aside>
     <main className="main"><header className="topbar"><div><div className="eyebrow">TRADING INTELLIGENCE / {view.toUpperCase()}</div><h1>{titles[view]}<span>.</span></h1></div><div className="top-actions"><span className="demo-badge"><span /> DEMO MODE</span><div className="avatar">BT</div></div></header>
@@ -33,6 +37,8 @@ export default function App() {
       {view === "overview" && <Overview />}
       {view === "lab" && <StrategyLab />}
       {view === "paper" && <PaperTrading paper={paper} />}
+      {view === "manual" && <ManualTrading />}
+      {view === "account" && <DerivConnection />}
       {view === "risk" && <><div className="section-heading"><div><div className="eyebrow">02 / CAPITAL PRESERVATION</div><h3>Risk engine</h3></div><span className="safe-label"><ShieldCheck size={14} /> CONSERVATIVE PRESET</span></div><RiskPanel /></>}
       <footer><span>BUTCHER TRADER <b>·</b> BUILD 0.2.0</span><span>STAY DISCIPLINED. NO GUARANTEED RETURNS.</span></footer>
     </main>
