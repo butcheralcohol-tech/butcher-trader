@@ -1,21 +1,25 @@
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { clearCookie, cookie, decryptSession, encryptSession, OAUTH_COOKIE, OAUTH_STATE_COOKIE, OAUTH_VERIFIER_COOKIE, parseCookies, safeEqual } from "../../../shared/oauth-session.js";
 
 const TOKEN_URL = "https://auth.deriv.com/oauth2/token";
 const APP_ORIGIN = "https://butcher-trader-lemon.vercel.app";
 
-function redirect(location: string, cookies: string[]): Response {
-  const headers = new Headers({
-    Location: location,
-    "Cache-Control": "no-store",
-    "Referrer-Policy": "no-referrer",
-  });
-  for (const value of cookies) headers.append("Set-Cookie", value);
-  return new Response(null, { status: 302, headers });
+function redirect(res: ServerResponse, location: string, cookies: string[]): void {
+  res.statusCode = 302;
+  res.setHeader("Location", location);
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Set-Cookie", cookies);
+  res.end();
 }
 
-export async function GET(request: Request): Promise<Response> {
-  const requestUrl = new URL(request.url);
-  const cookies = parseCookies(request.headers.get("cookie"));
+export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  let requestUrl: URL;
+  try { requestUrl = new URL(req.url ?? "/", `https://${req.headers.host ?? "butcher-trader-lemon.vercel.app"}`); } catch {
+    redirect(res, `${APP_ORIGIN}/?view=account&deriv_oauth=failed`, [clearCookie(OAUTH_STATE_COOKIE), clearCookie(OAUTH_VERIFIER_COOKIE)]);
+    return;
+  }
+  const cookies = parseCookies(typeof req.headers.cookie === "string" ? req.headers.cookie : null);
   const stateCookie = cookies[OAUTH_STATE_COOKIE];
   const verifier = cookies[OAUTH_VERIFIER_COOKIE];
   const returnedState = requestUrl.searchParams.get("state");
@@ -26,22 +30,16 @@ export async function GET(request: Request): Promise<Response> {
   const secret = process.env.SESSION_SECRET ?? "";
   const clearPending = [clearCookie(OAUTH_STATE_COOKIE), clearCookie(OAUTH_VERIFIER_COOKIE)];
 
-  if (oauthError) return redirect(`${APP_ORIGIN}/?view=account&deriv_oauth=cancelled`, clearPending);
+  if (oauthError) { redirect(res, `${APP_ORIGIN}/?view=account&deriv_oauth=cancelled`, clearPending); return; }
   if (!stateCookie || !verifier || !returnedState || !safeEqual(stateCookie, returnedState) || !code || code.length > 4096) {
-    return redirect(`${APP_ORIGIN}/?view=account&deriv_oauth=failed`, clearPending);
+    redirect(res, `${APP_ORIGIN}/?view=account&deriv_oauth=failed`, clearPending); return;
   }
   if (!clientId || !redirectUri || secret.length < 32) {
-    return redirect(`${APP_ORIGIN}/?view=account&deriv_oauth=misconfigured`, clearPending);
+    redirect(res, `${APP_ORIGIN}/?view=account&deriv_oauth=misconfigured`, clearPending); return;
   }
 
   try {
-    const body = new URLSearchParams({
-      grant_type: "authorization_code",
-      client_id: clientId,
-      code,
-      redirect_uri: redirectUri,
-      code_verifier: verifier,
-    });
+    const body = new URLSearchParams({ grant_type: "authorization_code", client_id: clientId, code, redirect_uri: redirectUri, code_verifier: verifier });
     const response = await fetch(TOKEN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
@@ -55,11 +53,8 @@ export async function GET(request: Request): Promise<Response> {
     const expiresAt = Date.now() + expiresIn * 1000;
     const encrypted = encryptSession({ accessToken: token.access_token, expiresAt }, secret);
     if (encrypted.length > 3500 || !decryptSession(encrypted, secret)) throw new Error("Could not safely store the encrypted session.");
-    return redirect(
-      `${APP_ORIGIN}/?view=account&deriv_oauth=connected`,
-      [...clearPending, cookie(OAUTH_COOKIE, encrypted, expiresIn)],
-    );
+    redirect(res, `${APP_ORIGIN}/?view=account&deriv_oauth=connected`, [...clearPending, cookie(OAUTH_COOKIE, encrypted, expiresIn)]);
   } catch {
-    return redirect(`${APP_ORIGIN}/?view=account&deriv_oauth=failed`, clearPending);
+    redirect(res, `${APP_ORIGIN}/?view=account&deriv_oauth=failed`, clearPending);
   }
 }
