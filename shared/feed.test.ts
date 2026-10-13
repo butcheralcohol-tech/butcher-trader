@@ -78,7 +78,7 @@ test("OHLC arriving before history does not falsely mark feed LIVE", () => {
 });
 
 test("a closed socket triggers a retry that opens a NEW connection, and stop() prevents further retries", async () => {
-  const { feed, infos } = make();
+  const { feed, infos } = make({ connectTimeoutMs: 5000, responseTimeoutMs: 5000 });
   feed.start();
   FakeSocket.all[0].onclose?.({} as CloseEvent);
   assert.equal(infos.at(-1)!.status, "ERROR");
