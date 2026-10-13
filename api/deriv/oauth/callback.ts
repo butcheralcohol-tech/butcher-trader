@@ -1,7 +1,17 @@
-import { clearCookie, cookie, decryptSession, encryptSession, OAUTH_COOKIE, OAUTH_COOKIE_TTL_SECONDS, OAUTH_STATE_COOKIE, OAUTH_VERIFIER_COOKIE, parseCookies, safeEqual } from "../../../shared/oauth-session.js";
+import { clearCookie, cookie, decryptSession, encryptSession, OAUTH_COOKIE, OAUTH_STATE_COOKIE, OAUTH_VERIFIER_COOKIE, parseCookies, safeEqual } from "../../../shared/oauth-session.js";
 
 const TOKEN_URL = "https://auth.deriv.com/oauth2/token";
 const APP_ORIGIN = "https://butcher-trader-lemon.vercel.app";
+
+function redirect(location: string, cookies: string[]): Response {
+  const headers = new Headers({
+    Location: location,
+    "Cache-Control": "no-store",
+    "Referrer-Policy": "no-referrer",
+  });
+  for (const value of cookies) headers.append("Set-Cookie", value);
+  return new Response(null, { status: 302, headers });
+}
 
 export async function GET(request: Request): Promise<Response> {
   const requestUrl = new URL(request.url);
@@ -14,14 +24,14 @@ export async function GET(request: Request): Promise<Response> {
   const clientId = process.env.DERIV_OAUTH_CLIENT_ID?.trim() ?? "";
   const redirectUri = process.env.DERIV_OAUTH_REDIRECT_URI?.trim() ?? "";
   const secret = process.env.SESSION_SECRET ?? "";
-  const clearPending = [clearCookie(OAUTH_STATE_COOKIE), clearCookie(OAUTH_VERIFIER_COOKIE)].join(", ");
+  const clearPending = [clearCookie(OAUTH_STATE_COOKIE), clearCookie(OAUTH_VERIFIER_COOKIE)];
 
-  if (oauthError) return new Response(null, { status: 302, headers: { Location: `${APP_ORIGIN}/?deriv_oauth=cancelled`, "Cache-Control": "no-store", "Set-Cookie": clearPending } });
-  if (!stateCookie || !verifier || !returnedState || !safeEqual(stateCookie, returnedState) || !code) {
-    return new Response(null, { status: 302, headers: { Location: `${APP_ORIGIN}/?deriv_oauth=failed`, "Cache-Control": "no-store", "Set-Cookie": clearPending } });
+  if (oauthError) return redirect(`${APP_ORIGIN}/?view=account&deriv_oauth=cancelled`, clearPending);
+  if (!stateCookie || !verifier || !returnedState || !safeEqual(stateCookie, returnedState) || !code || code.length > 4096) {
+    return redirect(`${APP_ORIGIN}/?view=account&deriv_oauth=failed`, clearPending);
   }
   if (!clientId || !redirectUri || secret.length < 32) {
-    return new Response(null, { status: 302, headers: { Location: `${APP_ORIGIN}/?deriv_oauth=misconfigured`, "Cache-Control": "no-store", "Set-Cookie": clearPending } });
+    return redirect(`${APP_ORIGIN}/?view=account&deriv_oauth=misconfigured`, clearPending);
   }
 
   try {
@@ -44,19 +54,12 @@ export async function GET(request: Request): Promise<Response> {
     const expiresIn = typeof token.expires_in === "number" && Number.isFinite(token.expires_in) ? Math.max(60, Math.min(token.expires_in, 3600)) : 3600;
     const expiresAt = Date.now() + expiresIn * 1000;
     const encrypted = encryptSession({ accessToken: token.access_token, expiresAt }, secret);
-    if (encrypted.length > 3500) throw new Error("Encrypted session exceeds the safe cookie size.");
-    // Validate that the generated cookie can be read before issuing it.
-    if (!decryptSession(encrypted, secret)) throw new Error("Could not validate the encrypted session.");
-    return new Response(null, {
-      status: 302,
-      headers: {
-        Location: `${APP_ORIGIN}/?view=account&deriv_oauth=connected`,
-        "Cache-Control": "no-store",
-        "Referrer-Policy": "no-referrer",
-        "Set-Cookie": [clearCookie(OAUTH_STATE_COOKIE), clearCookie(OAUTH_VERIFIER_COOKIE), cookie(OAUTH_COOKIE, encrypted, expiresIn)].join(", "),
-      },
-    });
+    if (encrypted.length > 3500 || !decryptSession(encrypted, secret)) throw new Error("Could not safely store the encrypted session.");
+    return redirect(
+      `${APP_ORIGIN}/?view=account&deriv_oauth=connected`,
+      [...clearPending, cookie(OAUTH_COOKIE, encrypted, expiresIn)],
+    );
   } catch {
-    return new Response(null, { status: 302, headers: { Location: `${APP_ORIGIN}/?view=account&deriv_oauth=failed`, "Cache-Control": "no-store", "Set-Cookie": clearPending } });
+    return redirect(`${APP_ORIGIN}/?view=account&deriv_oauth=failed`, clearPending);
   }
 }
