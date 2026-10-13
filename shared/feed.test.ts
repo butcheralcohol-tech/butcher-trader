@@ -62,6 +62,38 @@ test("API errors and empty history are surfaced as ERROR, not as a silent LIVE",
   feed.stop();
 });
 
+
+test("a WebSocket that never opens times out instead of staying CONNECTING forever", async () => {
+  FakeSocket.all = [];
+  const infos: FeedInfo[] = [];
+  const feed = new DerivFeed({
+    symbol: "R_100", granularity: 60, appId: "1", connectTimeoutMs: 15,
+    onCandles: () => {}, onInfo: i => infos.push(i),
+    wsFactory: u => new FakeSocket(u) as never
+  });
+  feed.start();
+  await wait(35);
+  assert.equal(infos.at(-1)!.status, "ERROR");
+  assert.match(infos.at(-1)!.message, /Timed out opening/);
+  feed.stop();
+});
+
+test("an open socket with no candle response times out with actionable diagnostics", async () => {
+  FakeSocket.all = [];
+  const infos: FeedInfo[] = [];
+  const feed = new DerivFeed({
+    symbol: "R_100", granularity: 60, appId: "1", responseTimeoutMs: 15,
+    onCandles: () => {}, onInfo: i => infos.push(i),
+    wsFactory: u => new FakeSocket(u) as never
+  });
+  feed.start();
+  FakeSocket.all[0].onopen?.({} as Event);
+  await wait(35);
+  assert.equal(infos.at(-1)!.status, "ERROR");
+  assert.match(infos.at(-1)!.message, /no candle data arrived/i);
+  feed.stop();
+});
+
 test("late messages from a replaced socket are ignored", () => {
   const { feed, seen } = make();
   feed.start();
