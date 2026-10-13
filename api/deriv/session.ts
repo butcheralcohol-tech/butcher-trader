@@ -1,18 +1,17 @@
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { OAUTH_COOKIE, decryptSession, parseCookies } from "../../shared/oauth-session.js";
 
-export async function GET(request: Request): Promise<Response> {
+export default function handler(req: IncomingMessage, res: ServerResponse): void {
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("Referrer-Policy", "no-referrer");
   const secret = process.env.SESSION_SECRET ?? "";
-  const configured = Boolean(
-    process.env.DERIV_OAUTH_CLIENT_ID?.trim() &&
-    process.env.DERIV_OAUTH_REDIRECT_URI?.trim() &&
-    secret.length >= 32
-  );
-  if (!configured) return Response.json({ connected: false, configured: false }, { headers: { "Cache-Control": "no-store" } });
-  const cookies = parseCookies(request.headers.get("cookie"));
+  const configured = Boolean(process.env.DERIV_OAUTH_CLIENT_ID?.trim() && process.env.DERIV_OAUTH_REDIRECT_URI?.trim() && secret.length >= 32);
+  if (!configured) {
+    res.end(JSON.stringify({ connected: false, configured: false, expiresAt: null }));
+    return;
+  }
+  const cookies = parseCookies(typeof req.headers.cookie === "string" ? req.headers.cookie : null);
   const session = decryptSession(cookies[OAUTH_COOKIE], secret);
-  return Response.json({
-    connected: Boolean(session),
-    configured: true,
-    expiresAt: session?.expiresAt ?? null,
-  }, { headers: { "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" } });
+  res.end(JSON.stringify({ connected: Boolean(session), configured: true, expiresAt: session?.expiresAt ?? null }));
 }
