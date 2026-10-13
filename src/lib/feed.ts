@@ -12,7 +12,7 @@ export const defaultAppId = () => String(import.meta.env.VITE_DERIV_APP_ID || "1
 export type FeedOptions = {
   symbol: string; granularity: number; count?: number; appId?: string;
   onCandles: (candles: Candle[]) => void; onInfo: (info: FeedInfo) => void;
-  staleMs?: number; wsFactory?: (url: string) => SocketLike;
+  staleMs?: number; connectTimeoutMs?: number; responseTimeoutMs?: number; wsFactory?: (url: string) => SocketLike;
 };
 
 /** Read-only Deriv candle feed: history + streaming OHLC, automatic reconnect with backoff, stale-connection watchdog and keep-alive pings. Never places orders. */
@@ -23,7 +23,7 @@ export class DerivFeed {
   private stopped = true;
   private lastMessageAt = 0;
   private lastDataAt: number | null = null;
-  private timers: { retry?: ReturnType<typeof setTimeout>; watchdog?: ReturnType<typeof setInterval>; ping?: ReturnType<typeof setInterval> } = {};
+  private timers: { retry?: ReturnType<typeof setTimeout>; connect?: ReturnType<typeof setTimeout>; response?: ReturnType<typeof setTimeout>; watchdog?: ReturnType<typeof setInterval>; ping?: ReturnType<typeof setInterval> } = {};
   constructor(private o: FeedOptions) {}
 
   start() {
@@ -35,7 +35,7 @@ export class DerivFeed {
 
   stop() {
     this.stopped = true;
-    clearTimeout(this.timers.retry); clearInterval(this.timers.watchdog); clearInterval(this.timers.ping);
+    clearTimeout(this.timers.retry); clearTimeout(this.timers.connect); clearTimeout(this.timers.response); clearInterval(this.timers.watchdog); clearInterval(this.timers.ping);
     this.detach();
     this.info("STOPPED", "Feed stopped.");
   }
@@ -55,10 +55,19 @@ export class DerivFeed {
     try { socket = (this.o.wsFactory ?? (u => new WebSocket(u)))(wsUrl(this.o.appId ?? defaultAppId())); }
     catch { return this.scheduleRetry("Could not open a WebSocket."); }
     this.socket = socket; this.lastMessageAt = Date.now();
+    this.timers.connect = setTimeout(() => {
+      if (this.socket === socket) this.scheduleRetry("Timed out opening the Deriv WebSocket. Check network access and the configured Deriv app ID.");
+    }, this.o.connectTimeoutMs ?? 12000);
     socket.onopen = () => {
       if (this.socket !== socket) return;
+      clearTimeout(this.timers.connect); this.timers.connect = undefined;
+      this.info("CONNECTING", "WebSocket open; requesting candle history…");
       // Re-requesting history on every (re)connect back-fills any candles missed while offline.
       socket.send(JSON.stringify({ ticks_history: this.o.symbol, adjust_start_time: 1, count: this.o.count ?? 500, end: "latest", style: "candles", granularity: this.o.granularity, subscribe: 1 }));
+      clearTimeout(this.timers.response);
+      this.timers.response = setTimeout(() => {
+        if (this.socket === socket && this.lastDataAt === null) this.scheduleRetry("Connected to Deriv, but no candle data arrived. Verify the app ID and market symbol.");
+      }, this.o.responseTimeoutMs ?? 15000);
       clearInterval(this.timers.ping);
       this.timers.ping = setInterval(() => { try { socket.send(JSON.stringify({ ping: 1 })); } catch { /* watchdog will recover */ } }, 25000);
     };
@@ -67,13 +76,15 @@ export class DerivFeed {
       this.lastMessageAt = Date.now();
       let msg: Record<string, unknown>;
       try { msg = JSON.parse(String(event.data)); } catch { return; }
-      if (msg.error) { const e = msg.error as { message?: string }; return this.fail(e.message ?? "Feed error"); }
+      if (msg.error) { const e = msg.error as { message?: string; code?: string }; return this.fail(`Deriv API error${e.code ? ` (${e.code})` : ""}: ${e.message ?? "Feed error"}`); }
       if (msg.msg_type === "candles") {
+        clearTimeout(this.timers.response); this.timers.response = undefined;
         const history = parseHistory(msg);
         if (!history.length) return this.fail("No candle history returned (market may be closed).");
         this.candles = history; this.markData(); this.attempt = 0;
         this.o.onCandles(this.candles); this.info("LIVE", "Live feed connected.");
       } else if (msg.msg_type === "ohlc") {
+        clearTimeout(this.timers.response); this.timers.response = undefined;
         const c = parseOhlc(msg);
         if (c) { this.candles = mergeCandle(this.candles, c, this.o.count ?? 500); this.markData(); this.o.onCandles(this.candles); this.info("LIVE", "Live feed connected."); }
       }
@@ -88,6 +99,8 @@ export class DerivFeed {
 
   private scheduleRetry(message: string) {
     if (this.stopped || this.timers.retry) return;
+    clearTimeout(this.timers.connect); this.timers.connect = undefined;
+    clearTimeout(this.timers.response); this.timers.response = undefined;
     this.detach(); clearInterval(this.timers.ping);
     const delay = backoffDelay(this.attempt++);
     this.info("ERROR", `${message} Retrying in ${Math.round(delay / 1000)}s.`);
