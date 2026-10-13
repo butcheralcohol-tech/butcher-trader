@@ -6,7 +6,13 @@ export type FeedInfo = { status: FeedStatus; message: string; attempt: number; l
 type SocketLike = Pick<WebSocket, "send" | "close" | "readyState"> & { onopen: ((e: Event) => void) | null; onmessage: ((e: MessageEvent) => void) | null; onerror: ((e: Event) => void) | null; onclose: ((e: CloseEvent) => void) | null };
 
 export const DERIV_WS = "wss://ws.derivws.com/websockets/v3";
-const wsUrl = (appId: string) => `${DERIV_WS}?app_id=${encodeURIComponent(appId)}`;
+export const DERIV_WS_FALLBACK = "wss://ws.binaryws.com/websockets/v3";
+// Both endpoints are documented Deriv public API hosts. Rotate on retries so a
+// network/edge-specific failure on one host does not leave the feed permanently down.
+const wsUrl = (appId: string, attempt = 0) => {
+  const endpoint = attempt % 2 === 0 ? DERIV_WS : DERIV_WS_FALLBACK;
+  return `${endpoint}?app_id=${encodeURIComponent(appId)}`;
+};
 export const defaultAppId = () => String(import.meta.env.VITE_DERIV_APP_ID || "1089");
 
 export type FeedOptions = {
@@ -58,7 +64,7 @@ export class DerivFeed {
     this.historyReceived = false;
     this.info(this.attempt === 0 ? "CONNECTING" : "RECONNECTING", this.attempt === 0 ? "Opening Deriv market-data connection…" : `Reconnecting (attempt ${this.attempt})…`);
     let socket: SocketLike;
-    try { socket = (this.o.wsFactory ?? (u => new WebSocket(u)))(wsUrl(this.o.appId ?? defaultAppId())); }
+    try { socket = (this.o.wsFactory ?? (u => new WebSocket(u)))(wsUrl(this.o.appId ?? defaultAppId(), this.attempt)); }
     catch { return this.scheduleRetry("Could not create the Deriv WebSocket. Check browser support and the configured app ID."); }
     this.socket = socket; this.lastMessageAt = Date.now();
     socket.onopen = () => {
@@ -101,7 +107,7 @@ export class DerivFeed {
     socket.onerror = () => { if (this.socket === socket) this.scheduleRetry("WebSocket network error. Check connectivity, firewall/content blockers, and VITE_DERIV_APP_ID."); };
     socket.onclose = () => { if (this.socket === socket) this.scheduleRetry("Deriv WebSocket closed before the feed was ready."); };
     this.timers.connectTimeout = setTimeout(() => {
-      if (this.socket === socket && socket.readyState !== 1) this.scheduleRetry("Timed out opening Deriv WebSocket. Check network access to wss://ws.derivws.com and the app ID.");
+      if (this.socket === socket && socket.readyState !== 1) this.scheduleRetry("Timed out opening Deriv WebSocket. Check network access to Deriv WebSocket endpoints and the app ID.");
     }, this.o.connectTimeoutMs ?? 15000);
   }
 
@@ -134,7 +140,7 @@ export function fetchCandles(symbol: string, granularity: number, count: number,
       try { socket.send(JSON.stringify({ ticks_history: symbol, adjust_start_time: 1, count: Math.min(5000, count), end: "latest", style: "candles", granularity })); }
       catch { done(() => reject(new Error("Could not request Deriv candle history."))); }
     };
-    socket.onerror = () => done(() => reject(new Error("Could not reach Deriv. Check network access and the configured app ID.")));
+    socket.onerror = () => done(() => reject(new Error("Could not reach Deriv. Check network access to wss://ws.derivws.com and wss://ws.binaryws.com, then verify the configured app ID.")));
     socket.onclose = () => done(() => reject(new Error("Deriv closed the connection before returning candle history.")));
     socket.onmessage = event => {
       let msg: Record<string, unknown>;

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { DerivFeed, type FeedInfo } from "../src/lib/feed.js";
+import { DerivFeed, DERIV_WS, DERIV_WS_FALLBACK, type FeedInfo } from "../src/lib/feed.js";
 import type { Candle } from "./types.js";
 
 class FakeSocket {
@@ -27,6 +27,7 @@ test("requests candle history with a subscription, then goes LIVE and merges OHL
   const { feed, infos, seen } = make();
   feed.start();
   const s = FakeSocket.all[0];
+  assert.equal(s.url, `${DERIV_WS}?app_id=1`);
   s.open();
   const req = JSON.parse(s.sent[0]);
   assert.equal(req.ticks_history, "R_100"); assert.equal(req.style, "candles"); assert.equal(req.subscribe, 1); assert.equal(req.granularity, 60);
@@ -84,6 +85,7 @@ test("a closed socket triggers a retry that opens a NEW connection, and stop() p
   assert.equal(infos.at(-1)!.status, "ERROR");
   await wait(1100);
   assert.equal(FakeSocket.all.length, 2);
+  assert.equal(FakeSocket.all[1].url, `${DERIV_WS_FALLBACK}?app_id=1`, "first retry rotates to alternate documented endpoint");
   feed.stop();
   FakeSocket.all[1].onclose?.({} as CloseEvent);
   await wait(50);
