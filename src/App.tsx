@@ -17,7 +17,7 @@ type View = "overview" | "lab" | "paper" | "manual" | "account" | "risk";
 const titles: Record<View, string> = { overview: "Control room", lab: "Strategy lab", paper: "Paper trading", manual: "Manual desk", account: "Deriv connection", risk: "Risk controls" };
 
 export default function App() {
-  const [view, setView] = useState<View>("overview");
+  const [view, setView] = useState<View>(() => new URLSearchParams(window.location.search).get("view") === "account" ? "account" : "overview");
   const paper = usePaper();
   const nav = (id: View, label: string, icon: JSX.Element, badge?: string) =>
     <button key={id} className={`nav-item ${view === id ? "active" : ""}`} onClick={() => setView(id)}>{icon} {label}{badge ? <span className="soon">{badge}</span> : view === id ? <span className="nav-dot" /> : null}</button>;

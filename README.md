@@ -12,7 +12,7 @@ Standalone React + TypeScript trading research dashboard. The frontend is built 
 - **Strategy library** behind a small `Strategy` interface (`shared/strategy.ts`): EMA cross + RSI filter, RSI mean reversion, Donchian breakout, trend pullback, and Bollinger reversion.
 - **Paper trading**: runs a selected strategy on the live feed with a virtual balance. Every signal goes through the risk gate; fills are simulated at the next candle open; each candle is processed exactly once; missed candles after a feed gap never trigger new entries. Audit log with CSV export, stored in the browser (localStorage).
 - **Manual trading desk**: live candle chart and selectable market/timeframe, with virtual LONG/SHORT entries and manual exits. This is a simplified spot-style simulation, not a Deriv contract, and sends no broker orders.
-- **Deriv connection setup**: a setup screen documents the OAuth app and secure callback requirements. It deliberately does not claim an account is connected and does not collect passwords or tokens.
+- **Deriv OAuth 2.0**: server-side Authorization Code + PKCE flow, state validation, encrypted short-lived HTTP-only session cookie, connection status endpoint and logout. OAuth login does not place orders.
 - Demo-only: **live order execution is not implemented.**
 - Risk gate: maximum 1% planned risk per trade, maximum 3% daily-loss cap (dashboard defaults to 2%), and at most one open position.
 - Shared pure logic in `shared/` is used by the Express server, the Vercel functions and the browser, and is covered by unit tests (risk gate, indicators, simulator, backtester incl. a no-look-ahead test, candle parsing, feed reconnect behaviour, paper session).
@@ -33,7 +33,7 @@ src/       React app; src/lib/feed.ts is the Deriv WebSocket client
 5. Verify `https://YOUR-DEPLOYMENT.vercel.app/api/health` returns JSON showing `"ok": true`, `"mode": "DEMO_ONLY"`, and `"liveTradingEnabled": false`.
 6. Open the dashboard and run the risk check. Confirm the API status is online and that invalid/excessive risk settings are blocked.
 
-The dashboard reads `VITE_DERIV_APP_ID` at build time and uses the public Deriv WebSocket feed. If you have a registered Deriv app ID, add `VITE_DERIV_APP_ID` in Vercel Project Settings → Environment Variables, then redeploy. The fallback app ID is for public feed access only. `VITE_DERIV_OAUTH_CLIENT_ID` only controls the setup-screen status indicator; it does not complete OAuth login.
+The dashboard reads `VITE_DERIV_APP_ID` at build time for public market data. For OAuth, set `DERIV_OAUTH_CLIENT_ID` to the numeric registered Deriv App ID, `DERIV_OAUTH_REDIRECT_URI` to `https://butcher-trader-lemon.vercel.app/deriv/callback`, and `SESSION_SECRET` to a randomly generated secret of at least 32 characters. `VITE_DERIV_OAUTH_CLIENT_ID` is only a public setup-screen hint; server-side OAuth uses the non-VITE variables. Redeploy after changing environment variables.
 
 ## Run locally (Node.js 20+)
 ```bash
@@ -49,10 +49,10 @@ Checks: `npm test`, `npm run typecheck`, `npm run build` (or `npm run check` for
 Vercel Functions are request-driven serverless functions, not a persistent always-on trading worker. The market WebSocket and the paper trader run in the user's browser, so they stop when the dashboard closes. Do not use this deployment as an autonomous trading bot. A future continuously running worker needs a separate persistent host, durable storage, monitoring and recovery.
 
 ## Deriv integration status
-The dashboard uses public/read-only Deriv market data (`ticks_history` with candles, plus a subscription) in the browser; no token is involved. Forex markets are closed on weekends, so only synthetic indices stream then. Manual trading is virtual only, and order placement to a broker is not implemented. The Deriv connection screen is a setup guide, not a working OAuth login. Never put Deriv API tokens or other secrets in frontend code or commit secrets.
+The dashboard uses public/read-only Deriv market data (`ticks_history` with candles, plus a subscription) in the browser; no token is involved. OAuth is implemented with PKCE and a short-lived encrypted HTTP-only cookie. The access token is not returned to browser JavaScript; the app does not yet use it to fetch account data or open an authenticated trading WebSocket. Manual trading is virtual only, and order placement to a broker is not implemented. Never put Deriv API tokens or other secrets in frontend code or commit secrets.
 
 ## Safety
-Research starter, not financial advice or a profitable-strategy claim. Risk limits do not guarantee loss prevention. Real-account execution is intentionally absent. Before any future live mode: implement server-side OAuth with state/PKCE and secure HTTP-only sessions, authenticated Deriv WebSocket handling, instrument allowlists, proposal validation, explicit per-order confirmation, server-side risk enforcement, hard daily stop, durable audit logs, idempotent order handling, integration tests and extended demo forward-testing.
+Research starter, not financial advice or a profitable-strategy claim. Risk limits do not guarantee loss prevention. Real-account execution is intentionally absent. Before any future live mode: implement authenticated Deriv REST/OTP/WebSocket account workflows, instrument allowlists, proposal validation, explicit per-order confirmation, server-side risk enforcement, hard daily stop, durable audit logs, idempotent order handling, integration tests and extended demo forward-testing.
 
 ## Roadmap
 1. Foundation and risk gate. Done.
@@ -60,7 +60,7 @@ Research starter, not financial advice or a profitable-strategy claim. Risk limi
 3. Candlestick history + strategy interfaces. Done.
 4. Backtesting with fees/slippage and out-of-sample evaluation. Done.
 5. Demo signal lifecycle and audit log. Done (browser-local; a server-side durable log is still to do).
-6. Complete Deriv OAuth callback and secure authenticated account session.
+6. Deriv OAuth callback and encrypted HTTP-only session. Done; account data and authenticated trading WebSocket remain to do.
 7. Implement and test broker demo orders with explicit confirmations and server-side risk controls.
 8. Persistent worker for unattended paper trading (separate host, durable storage, monitoring).
 9. Security review before any separately gated live mode.

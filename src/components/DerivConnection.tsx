@@ -1,26 +1,65 @@
-import { ExternalLink, KeyRound, LockKeyhole, ShieldCheck } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ExternalLink, KeyRound, LockKeyhole, LogOut, ShieldCheck } from "lucide-react";
 
-const clientId = String(import.meta.env.VITE_DERIV_OAUTH_CLIENT_ID ?? "").trim();
+type SessionStatus = { connected: boolean; configured: boolean; expiresAt: number | null };
 
 export default function DerivConnection() {
+  const [session, setSession] = useState<SessionStatus>({ connected: false, configured: false, expiresAt: null });
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    let active = true;
+    const query = new URLSearchParams(window.location.search);
+    const result = query.get("deriv_oauth");
+    if (result === "connected") setMessage("Deriv authorized successfully. Your session is stored in a secure HTTP-only cookie.");
+    else if (result === "cancelled") setMessage("Deriv sign-in was cancelled.");
+    else if (result === "failed") setMessage("Deriv sign-in could not be completed. Check the callback URL and environment settings, then try again.");
+    else if (result === "misconfigured") setMessage("OAuth server configuration is incomplete. Check the Vercel environment variables.");
+
+    fetch("/api/deriv/session", { credentials: "same-origin", cache: "no-store" })
+      .then(response => response.ok ? response.json() as Promise<SessionStatus> : Promise.reject(new Error("Session status unavailable")))
+      .then(value => { if (active) setSession(value); })
+      .catch(() => { if (active) setSession({ connected: false, configured: false, expiresAt: null }); });
+    return () => { active = false; };
+  }, []);
+
+  async function disconnect() {
+    setBusy(true);
+    try {
+      const response = await fetch("/api/deriv/oauth/logout", { method: "POST", credentials: "same-origin" });
+      if (!response.ok) throw new Error("Could not end the session.");
+      setSession(current => ({ ...current, connected: false, expiresAt: null }));
+      setMessage("Deriv session disconnected from this browser.");
+    } catch {
+      setMessage("Could not disconnect right now. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return <div className="lab">
     <div className="section-heading"><div><div className="eyebrow">06 / BROKER INTEGRATION</div><h3>Deriv account connection</h3></div><span className="safe-label"><LockKeyhole size={14} /> LIVE TRADING LOCKED</span></div>
     <section className="panel account-connect">
       <div className="account-icon"><KeyRound size={23} /></div>
-      <div className="account-copy"><h3>Connect through Deriv OAuth</h3><p>Use Deriv's official sign-in and consent flow. Never enter your Deriv password or paste an account token into this dashboard.</p>
-        <div className="connection-state"><span className={clientId ? "pulse" : "pulse muted"} />{clientId ? "OAuth client ID configured" : "OAuth app not configured"}</div>
+      <div className="account-copy"><h3>Connect through Deriv OAuth</h3><p>Sign in on Deriv and review the requested permission there. Never enter your Deriv password or paste an account token into this dashboard.</p>
+        <div className="connection-state"><span className={session.connected ? "pulse" : "pulse muted"} />{session.connected ? "Deriv account connected" : session.configured ? "Not connected" : "OAuth server configuration required"}</div>
+        {session.connected && session.expiresAt && <small>Session expires {new Date(session.expiresAt).toLocaleTimeString()}</small>}
       </div>
-      <a className="ghost-btn" href="https://app.deriv.com/account/api-token" target="_blank" rel="noreferrer">Deriv account <ExternalLink size={13} /></a>
+      {session.connected
+        ? <button className="ghost-btn" onClick={disconnect} disabled={busy}>{busy ? "Disconnecting…" : "Disconnect"} <LogOut size={13} /></button>
+        : <a className="ghost-btn" href="/api/deriv/oauth/start">Connect Deriv account <ExternalLink size={13} /></a>}
     </section>
+    {message && <section className="panel"><p role="status">{message}</p></section>}
     <section className="panel">
-      <div className="card-title"><ShieldCheck size={17} /><b>Setup checklist</b><span className="card-status">REQUIRED</span></div>
+      <div className="card-title"><ShieldCheck size={17} /><b>Connection security</b><span className="card-status">PKCE</span></div>
       <ol className="setup-steps">
-        <li><b>Register a Deriv OAuth application</b><span>In the Deriv developer dashboard, register BUTCHER TRADER and set the exact HTTPS callback URL for the deployed app.</span><a href="https://developers.deriv.com/docs/intro/oauth/" target="_blank" rel="noreferrer">Read the official OAuth guide <ExternalLink size={12} /></a></li>
-        <li><b>Configure server-only credentials</b><span>Set <code>DERIV_OAUTH_CLIENT_ID</code>, <code>DERIV_OAUTH_CLIENT_SECRET</code>, <code>DERIV_OAUTH_REDIRECT_URI</code>, and a strong <code>SESSION_SECRET</code> in the deployment environment. Do not use VITE_ prefixes for secrets.</span></li>
-        <li><b>Complete secure session exchange</b><span>The production callback must validate OAuth state/PKCE, exchange the code on the server, and keep credentials in an HTTP-only secure session. This repo does not yet implement that callback or authenticated account WebSocket.</span></li>
-        <li><b>Test on a Deriv demo account first</b><span>Account balance display, proposal validation, order confirmation, idempotency, stop conditions, and audit logging must pass tests before enabling real-account execution.</span></li>
+        <li><b>Official Deriv sign-in</b><span>Authentication is handled by Deriv. BUTCHER TRADER never asks for your Deriv password.</span><a href="https://developers.deriv.com/docs/intro/oauth/" target="_blank" rel="noreferrer">Read the official OAuth guide <ExternalLink size={12} /></a></li>
+        <li><b>Protected authorization flow</b><span>Fresh state and PKCE values are generated server-side. The callback validates state and exchanges the authorization code on the server.</span></li>
+        <li><b>Private session storage</b><span>The short-lived access token is encrypted and held in an HTTP-only, Secure, SameSite cookie. It is never returned to browser JavaScript. Sign in again when the session expires.</span></li>
+        <li><b>Demo-first trading</b><span>This connection does not place orders or enable live execution. Authenticated account data and broker order workflows still need separate implementation and testing.</span></li>
       </ol>
     </section>
-    <section className="warning-note"><b>No fake connection status</b><p>This screen is a setup guide, not a completed login. A public market-data feed does not authenticate an account. Real-account orders remain disabled until the secure OAuth callback, authenticated Deriv session, server-side risk gate and explicit order-confirmation flow are implemented and verified.</p></section>
+    <section className="warning-note"><b>Live execution remains disabled</b><p>OAuth only authorizes the account session. It does not place trades. Real-account order execution is not implemented and remains hard-disabled.</p></section>
   </div>;
 }

@@ -4,6 +4,7 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
+    { "source": "/deriv/callback", "destination": "/api/deriv/oauth/callback" },
     { "source": "/(.*)", "destination": "/index.html" }
   ],
   "headers": [
