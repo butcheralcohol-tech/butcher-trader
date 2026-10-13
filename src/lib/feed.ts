@@ -65,8 +65,9 @@ export class DerivFeed {
       // Re-requesting history on every (re)connect back-fills any candles missed while offline.
       socket.send(JSON.stringify({ ticks_history: this.o.symbol, adjust_start_time: 1, count: this.o.count ?? 500, end: "latest", style: "candles", granularity: this.o.granularity, subscribe: 1 }));
       clearTimeout(this.timers.response);
+      const lastDataAtAtRequest = this.lastDataAt;
       this.timers.response = setTimeout(() => {
-        if (this.socket === socket && this.lastDataAt === null) this.scheduleRetry("Connected to Deriv, but no candle data arrived. Verify the app ID and market symbol.");
+        if (this.socket === socket && this.lastDataAt === lastDataAtAtRequest) this.scheduleRetry("Connected to Deriv, but no candle data arrived. Verify the app ID and market symbol.");
       }, this.o.responseTimeoutMs ?? 15000);
       clearInterval(this.timers.ping);
       this.timers.ping = setInterval(() => { try { socket.send(JSON.stringify({ ping: 1 })); } catch { /* watchdog will recover */ } }, 25000);
