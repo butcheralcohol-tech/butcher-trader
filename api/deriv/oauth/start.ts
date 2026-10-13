@@ -28,15 +28,12 @@ export async function GET(): Promise<Response> {
   authorization.searchParams.set("code_challenge", challenge);
   authorization.searchParams.set("code_challenge_method", "S256");
 
-  return new Response(null, {
-    status: 302,
-    headers: {
-      Location: authorization.toString(),
-      "Cache-Control": "no-store",
-      "Set-Cookie": [
-        cookie(OAUTH_STATE_COOKIE, state, 600),
-        cookie(OAUTH_VERIFIER_COOKIE, verifier, 600),
-      ].join(", "),
-    },
+  const headers = new Headers({
+    Location: authorization.toString(),
+    "Cache-Control": "no-store",
+    "Referrer-Policy": "no-referrer",
   });
+  headers.append("Set-Cookie", cookie(OAUTH_STATE_COOKIE, state, 600));
+  headers.append("Set-Cookie", cookie(OAUTH_VERIFIER_COOKIE, verifier, 600));
+  return new Response(null, { status: 302, headers });
 }
