@@ -3,12 +3,13 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { cookie, OAUTH_STATE_COOKIE, OAUTH_VERIFIER_COOKIE, randomUrlSafe } from "../../../shared/oauth-session.js";
 
 const AUTH_URL = "https://auth.deriv.com/oauth2/auth";
+const APP_HOST = "butcherfx.vercel.app";
 
 export default function handler(_req: IncomingMessage, res: ServerResponse): void {
   const clientId = process.env.DERIV_OAUTH_CLIENT_ID?.trim();
   const redirectUri = process.env.DERIV_OAUTH_REDIRECT_URI?.trim();
   const sessionSecret = process.env.SESSION_SECRET ?? "";
-  if (!clientId || !/^\d+$/.test(clientId) || !redirectUri || !sessionSecret || sessionSecret.length < 32) {
+  if (!clientId || !redirectUri || !sessionSecret || sessionSecret.length < 32) {
     res.statusCode = 503;
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     res.end(JSON.stringify({ error: "OAuth is not configured. Set DERIV_OAUTH_CLIENT_ID, DERIV_OAUTH_REDIRECT_URI, and a SESSION_SECRET of at least 32 characters." }));
@@ -19,9 +20,11 @@ export default function handler(_req: IncomingMessage, res: ServerResponse): voi
     res.statusCode = 503; res.setHeader("Content-Type", "application/json; charset=utf-8");
     res.end(JSON.stringify({ error: "DERIV_OAUTH_REDIRECT_URI is invalid." })); return;
   }
-  if (redirect.protocol !== "https:" || redirect.hostname !== "butcher-trader-lemon.vercel.app" || redirect.pathname !== "/deriv/callback") {
-    res.statusCode = 503; res.setHeader("Content-Type", "application/json; charset=utf-8");
-    res.end(JSON.stringify({ error: "The OAuth redirect URI must be the registered HTTPS production callback URL." })); return;
+  if (redirect.protocol !== "https:" || redirect.hostname !== APP_HOST || redirect.pathname !== "/deriv/callback" || redirect.search || redirect.hash) {
+    res.statusCode = 503;
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.end(JSON.stringify({ error: "DERIV_OAUTH_REDIRECT_URI must exactly match the registered HTTPS callback URL." }));
+    return;
   }
 
   const state = randomUrlSafe(32);
