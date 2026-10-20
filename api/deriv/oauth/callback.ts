@@ -27,7 +27,7 @@ function redirect(res: ServerResponse, location: string, cookies: string[]): voi
   res.end();
 }
 
-function accountRedirect(result: "failed" | "cancelled" | "misconfigured" | "connected", cookies: string[], reason?: FailureReason): string {
+function accountRedirect(result: "failed" | "cancelled" | "misconfigured" | "connected", reason?: FailureReason): string {
   const target = new URL("/", APP_ORIGIN);
   target.searchParams.set("view", "account");
   target.searchParams.set("deriv_oauth", result);
@@ -38,7 +38,7 @@ function accountRedirect(result: "failed" | "cancelled" | "misconfigured" | "con
 function fail(res: ServerResponse, cookies: string[], reason: FailureReason): void {
   // Log only a fixed reason code. Never log authorization codes, cookies, verifier values, or tokens.
   console.warn("[deriv-oauth] callback failed", { reason });
-  redirect(res, accountRedirect("failed", cookies, reason), cookies);
+  redirect(res, accountRedirect("failed", reason), cookies);
 }
 
 export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -63,7 +63,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
 
   if (oauthError) {
     console.warn("[deriv-oauth] provider returned an OAuth error");
-    redirect(res, accountRedirect("cancelled", clearPending), clearPending);
+    redirect(res, accountRedirect("cancelled"), clearPending);
     return;
   }
   if (!stateCookie) { fail(res, clearPending, "missing_state_cookie"); return; }
@@ -72,7 +72,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
   if (!safeEqual(stateCookie, returnedState)) { fail(res, clearPending, "state_mismatch"); return; }
   if (!code || code.length > 4096) { fail(res, clearPending, "missing_code"); return; }
   if (!clientId || !redirectUri || secret.length < 32) {
-    redirect(res, accountRedirect("misconfigured", clearPending, "oauth_misconfigured"), clearPending);
+    redirect(res, accountRedirect("misconfigured", "oauth_misconfigured"), clearPending);
     return;
   }
 
@@ -114,7 +114,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       fail(res, clearPending, "session_storage_failed");
       return;
     }
-    redirect(res, accountRedirect("connected", [...clearPending, cookie(OAUTH_COOKIE, encrypted, expiresIn)]), [
+    redirect(res, accountRedirect("connected"), [
       ...clearPending,
       cookie(OAUTH_COOKIE, encrypted, expiresIn),
     ]);
