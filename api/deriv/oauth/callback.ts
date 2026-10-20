@@ -4,6 +4,20 @@ import { clearCookie, cookie, decryptSession, encryptSession, OAUTH_COOKIE, OAUT
 const TOKEN_URL = "https://auth.deriv.com/oauth2/token";
 const APP_ORIGIN = "https://butcherfx.vercel.app";
 
+type FailureReason =
+  | "provider_error"
+  | "missing_state_cookie"
+  | "missing_pkce_cookie"
+  | "missing_returned_state"
+  | "state_mismatch"
+  | "missing_code"
+  | "oauth_misconfigured"
+  | "token_exchange_rejected"
+  | "token_response_invalid"
+  | "session_cookie_too_large"
+  | "session_storage_failed"
+  | "token_exchange_unavailable";
+
 function redirect(res: ServerResponse, location: string, cookies: string[]): void {
   res.statusCode = 302;
   res.setHeader("Location", location);
@@ -13,12 +27,29 @@ function redirect(res: ServerResponse, location: string, cookies: string[]): voi
   res.end();
 }
 
+function accountRedirect(result: "failed" | "cancelled" | "misconfigured" | "connected", reason?: FailureReason): string {
+  const target = new URL("/", APP_ORIGIN);
+  target.searchParams.set("view", "account");
+  target.searchParams.set("deriv_oauth", result);
+  if (reason) target.searchParams.set("deriv_reason", reason);
+  return target.toString();
+}
+
+function fail(res: ServerResponse, cookies: string[], reason: FailureReason): void {
+  // Log only a fixed reason code. Never log authorization codes, cookies, verifier values, or tokens.
+  console.warn("[deriv-oauth] callback failed", { reason });
+  redirect(res, accountRedirect("failed", reason), cookies);
+}
+
 export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
   let requestUrl: URL;
-  try { requestUrl = new URL(req.url ?? "/", `https://butcherfx.vercel.app`); } catch {
-    redirect(res, `${APP_ORIGIN}/?view=account&deriv_oauth=failed`, [clearCookie(OAUTH_STATE_COOKIE), clearCookie(OAUTH_VERIFIER_COOKIE)]);
+  try {
+    requestUrl = new URL(req.url ?? "/", APP_ORIGIN);
+  } catch {
+    fail(res, [clearCookie(OAUTH_STATE_COOKIE), clearCookie(OAUTH_VERIFIER_COOKIE)], "missing_code");
     return;
   }
+
   const cookies = parseCookies(typeof req.headers.cookie === "string" ? req.headers.cookie : null);
   const stateCookie = cookies[OAUTH_STATE_COOKIE];
   const verifier = cookies[OAUTH_VERIFIER_COOKIE];
@@ -30,31 +61,64 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
   const secret = process.env.SESSION_SECRET ?? "";
   const clearPending = [clearCookie(OAUTH_STATE_COOKIE), clearCookie(OAUTH_VERIFIER_COOKIE)];
 
-  if (oauthError) { redirect(res, `${APP_ORIGIN}/?view=account&deriv_oauth=cancelled`, clearPending); return; }
-  if (!stateCookie || !verifier || !returnedState || !safeEqual(stateCookie, returnedState) || !code || code.length > 4096) {
-    redirect(res, `${APP_ORIGIN}/?view=account&deriv_oauth=failed`, clearPending); return;
+  if (oauthError) {
+    console.warn("[deriv-oauth] provider returned an OAuth error");
+    redirect(res, accountRedirect("cancelled"), clearPending);
+    return;
   }
+  if (!stateCookie) { fail(res, clearPending, "missing_state_cookie"); return; }
+  if (!verifier) { fail(res, clearPending, "missing_pkce_cookie"); return; }
+  if (!returnedState) { fail(res, clearPending, "missing_returned_state"); return; }
+  if (!safeEqual(stateCookie, returnedState)) { fail(res, clearPending, "state_mismatch"); return; }
+  if (!code || code.length > 4096) { fail(res, clearPending, "missing_code"); return; }
   if (!clientId || !redirectUri || secret.length < 32) {
-    redirect(res, `${APP_ORIGIN}/?view=account&deriv_oauth=misconfigured`, clearPending); return;
+    redirect(res, accountRedirect("misconfigured", "oauth_misconfigured"), clearPending);
+    return;
   }
 
   try {
-    const body = new URLSearchParams({ grant_type: "authorization_code", client_id: clientId, code, redirect_uri: redirectUri, code_verifier: verifier });
+    const body = new URLSearchParams({
+      grant_type: "authorization_code",
+      client_id: clientId,
+      code,
+      redirect_uri: redirectUri,
+      code_verifier: verifier,
+    });
     const response = await fetch(TOKEN_URL, {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
       body,
       signal: AbortSignal.timeout(12000),
     });
-    if (!response.ok) throw new Error("Deriv token exchange failed.");
+    if (!response.ok) {
+      // Record only the HTTP status; provider response bodies are deliberately not logged or surfaced.
+      console.warn("[deriv-oauth] token exchange rejected", { status: response.status });
+      fail(res, clearPending, "token_exchange_rejected");
+      return;
+    }
     const token = await response.json() as { access_token?: unknown; expires_in?: unknown; token_type?: unknown };
-    if (typeof token.access_token !== "string" || !token.access_token || (token.token_type && token.token_type !== "Bearer")) throw new Error("Deriv returned an invalid token response.");
-    const expiresIn = typeof token.expires_in === "number" && Number.isFinite(token.expires_in) ? Math.max(60, Math.min(token.expires_in, 3600)) : 3600;
+    if (typeof token.access_token !== "string" || !token.access_token || (token.token_type && token.token_type !== "Bearer")) {
+      fail(res, clearPending, "token_response_invalid");
+      return;
+    }
+    const expiresIn = typeof token.expires_in === "number" && Number.isFinite(token.expires_in)
+      ? Math.max(60, Math.min(token.expires_in, 3600))
+      : 3600;
     const expiresAt = Date.now() + expiresIn * 1000;
     const encrypted = encryptSession({ accessToken: token.access_token, expiresAt }, secret);
-    if (encrypted.length > 3500 || !decryptSession(encrypted, secret)) throw new Error("Could not safely store the encrypted session.");
-    redirect(res, `${APP_ORIGIN}/?view=account&deriv_oauth=connected`, [...clearPending, cookie(OAUTH_COOKIE, encrypted, expiresIn)]);
+    if (encrypted.length > 3500) {
+      fail(res, clearPending, "session_cookie_too_large");
+      return;
+    }
+    if (!decryptSession(encrypted, secret)) {
+      fail(res, clearPending, "session_storage_failed");
+      return;
+    }
+    redirect(res, accountRedirect("connected"), [
+      ...clearPending,
+      cookie(OAUTH_COOKIE, encrypted, expiresIn),
+    ]);
   } catch {
-    redirect(res, `${APP_ORIGIN}/?view=account&deriv_oauth=failed`, clearPending);
+    fail(res, clearPending, "token_exchange_unavailable");
   }
 }
