@@ -9,7 +9,7 @@ export default function handler(_req: IncomingMessage, res: ServerResponse): voi
   const clientId = process.env.DERIV_OAUTH_CLIENT_ID?.trim();
   const redirectUri = process.env.DERIV_OAUTH_REDIRECT_URI?.trim();
   const sessionSecret = process.env.SESSION_SECRET ?? "";
-  if (!clientId || !/^\d+$/.test(clientId) || !redirectUri || !sessionSecret || sessionSecret.length < 32) {
+  if (!clientId || !redirectUri || !sessionSecret || sessionSecret.length < 32) {
     res.statusCode = 503;
     res.setHeader("Content-Type", "application/json; charset=utf-8");
     res.end(JSON.stringify({ error: "OAuth is not configured. Set DERIV_OAUTH_CLIENT_ID, DERIV_OAUTH_REDIRECT_URI, and a SESSION_SECRET of at least 32 characters." }));
