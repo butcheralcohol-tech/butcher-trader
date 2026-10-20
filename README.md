@@ -33,7 +33,7 @@ src/       React app; src/lib/feed.ts is the Deriv WebSocket client
 5. Verify `https://YOUR-DEPLOYMENT.vercel.app/api/health` returns JSON showing `"ok": true`, `"mode": "DEMO_ONLY"`, and `"liveTradingEnabled": false`.
 6. Open the dashboard and run the risk check. Confirm the API status is online and that invalid/excessive risk settings are blocked.
 
-The dashboard reads `VITE_DERIV_APP_ID` at build time for public market data. For OAuth, set `DERIV_OAUTH_CLIENT_ID` to the numeric registered Deriv App ID, `DERIV_OAUTH_REDIRECT_URI` to `https://butcherfx.vercel.app/deriv/callback`, and `SESSION_SECRET` to a randomly generated secret of at least 32 characters. `VITE_DERIV_OAUTH_CLIENT_ID` is only a public setup-screen hint; server-side OAuth uses the non-VITE variables. Redeploy after changing environment variables.
+The dashboard reads `VITE_DERIV_APP_ID` at build time for public market data. For OAuth, set `DERIV_OAUTH_CLIENT_ID` to the client ID shown for your registered Deriv OAuth app, `DERIV_OAUTH_REDIRECT_URI` to `https://butcherfx.vercel.app/deriv/callback`, and `SESSION_SECRET` to a randomly generated secret of at least 32 characters. `VITE_DERIV_OAUTH_CLIENT_ID` is only a public setup-screen hint; server-side OAuth uses the non-VITE variables. Redeploy after changing environment variables.
 
 ## Run locally (Node.js 20+)
 ```bash
