@@ -97,7 +97,11 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       return;
     }
     const token = await response.json() as { access_token?: unknown; expires_in?: unknown; token_type?: unknown };
-    if (typeof token.access_token !== "string" || !token.access_token || (token.token_type && token.token_type !== "Bearer")) {
+    if (
+      typeof token.access_token !== "string" ||
+      !token.access_token ||
+      (token.token_type !== undefined && (typeof token.token_type !== "string" || token.token_type.toLowerCase() !== "bearer"))
+    ) {
       fail(res, clearPending, "token_response_invalid");
       return;
     }
