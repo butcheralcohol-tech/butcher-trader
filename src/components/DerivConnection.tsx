@@ -3,6 +3,21 @@ import { ExternalLink, KeyRound, LockKeyhole, LogOut, ShieldCheck } from "lucide
 
 type SessionStatus = { connected: boolean; configured: boolean; expiresAt: number | null };
 
+const oauthFailureMessages: Record<string, string> = {
+  provider_error: "Deriv returned an authorization error or the sign-in was cancelled. Start a fresh connection attempt.",
+  missing_state_cookie: "The browser did not return the OAuth state cookie. Allow cookies for butcherfx.vercel.app and retry.",
+  missing_pkce_cookie: "The browser did not return the PKCE verifier cookie. Allow cookies for butcherfx.vercel.app and retry.",
+  missing_returned_state: "Deriv returned without the required state parameter. Start a fresh connection attempt.",
+  state_mismatch: "The OAuth state check failed. For your security, the callback was rejected. Start a fresh connection attempt.",
+  missing_code: "Deriv did not return a usable authorization code. Start a fresh connection attempt.",
+  oauth_misconfigured: "OAuth server configuration is incomplete. Check the Vercel environment variables.",
+  token_exchange_rejected: "Deriv rejected the authorization-code exchange. The code may be expired/used, the PKCE verifier may not match, or the registered client/redirect URI may not match.",
+  token_response_invalid: "Deriv returned an unexpected token response. No session was saved.",
+  session_cookie_too_large: "The encrypted session did not fit safely in a browser cookie. No session was saved.",
+  session_storage_failed: "The encrypted session could not be validated. No session was saved.",
+  token_exchange_unavailable: "The token exchange could not be completed because of a network, timeout, or server error. Start a fresh connection attempt.",
+};
+
 export default function DerivConnection() {
   const [session, setSession] = useState<SessionStatus>({ connected: false, configured: false, expiresAt: null });
   const [busy, setBusy] = useState(false);
@@ -12,10 +27,11 @@ export default function DerivConnection() {
     let active = true;
     const query = new URLSearchParams(window.location.search);
     const result = query.get("deriv_oauth");
+    const reason = query.get("deriv_reason");
     if (result === "connected") setMessage("Deriv authorized successfully. Your session is stored in a secure HTTP-only cookie.");
-    else if (result === "cancelled") setMessage("Deriv sign-in was cancelled.");
-    else if (result === "failed") setMessage("Deriv sign-in could not be completed. Check the callback URL and environment settings, then try again.");
-    else if (result === "misconfigured") setMessage("OAuth server configuration is incomplete. Check the Vercel environment variables.");
+    else if (result === "cancelled") setMessage("Deriv sign-in was cancelled or declined.");
+    else if (result === "failed") setMessage(oauthFailureMessages[reason ?? ""] ?? "Deriv sign-in could not be completed. Start a fresh connection attempt.");
+    else if (result === "misconfigured") setMessage(oauthFailureMessages[reason ?? ""] ?? "OAuth server configuration is incomplete. Check the Vercel environment variables.");
 
     fetch("/api/deriv/session", { credentials: "same-origin", cache: "no-store" })
       .then(response => response.ok ? response.json() as Promise<SessionStatus> : Promise.reject(new Error("Session status unavailable")))
