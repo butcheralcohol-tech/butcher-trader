@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { clearCookie, cookie, decryptSession, encryptSession, OAUTH_COOKIE, OAUTH_STATE_COOKIE, OAUTH_VERIFIER_COOKIE, parseCookies, safeEqual } from "../../../shared/oauth-session.js";
 
 const TOKEN_URL = "https://auth.deriv.com/oauth2/token";
-const APP_ORIGIN = "https://butcher-trader-lemon.vercel.app";
+const APP_ORIGIN = "https://butcherfx.vercel.app";
 
 function redirect(res: ServerResponse, location: string, cookies: string[]): void {
   res.statusCode = 302;
@@ -15,7 +15,7 @@ function redirect(res: ServerResponse, location: string, cookies: string[]): voi
 
 export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
   let requestUrl: URL;
-  try { requestUrl = new URL(req.url ?? "/", `https://${req.headers.host ?? "butcher-trader-lemon.vercel.app"}`); } catch {
+  try { requestUrl = new URL(req.url ?? "/", `https://butcherfx.vercel.app`); } catch {
     redirect(res, `${APP_ORIGIN}/?view=account&deriv_oauth=failed`, [clearCookie(OAUTH_STATE_COOKIE), clearCookie(OAUTH_VERIFIER_COOKIE)]);
     return;
   }
