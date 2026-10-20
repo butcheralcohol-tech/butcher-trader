@@ -33,7 +33,7 @@ src/       React app; src/lib/feed.ts is the Deriv WebSocket client
 5. Verify `https://YOUR-DEPLOYMENT.vercel.app/api/health` returns JSON showing `"ok": true`, `"mode": "DEMO_ONLY"`, and `"liveTradingEnabled": false`.
 6. Open the dashboard and run the risk check. Confirm the API status is online and that invalid/excessive risk settings are blocked.
 
-The dashboard reads `VITE_DERIV_APP_ID` at build time for public market data. For OAuth, set `DERIV_OAUTH_CLIENT_ID` to the numeric registered Deriv App ID, `DERIV_OAUTH_REDIRECT_URI` to `https://butcher-trader-lemon.vercel.app/deriv/callback`, and `SESSION_SECRET` to a randomly generated secret of at least 32 characters. `VITE_DERIV_OAUTH_CLIENT_ID` is only a public setup-screen hint; server-side OAuth uses the non-VITE variables. Redeploy after changing environment variables.
+The dashboard reads `VITE_DERIV_APP_ID` at build time for public market data. For OAuth, set `DERIV_OAUTH_CLIENT_ID` to the numeric registered Deriv App ID, `DERIV_OAUTH_REDIRECT_URI` to `https://butcherfx.vercel.app/deriv/callback`, and `SESSION_SECRET` to a randomly generated secret of at least 32 characters. `VITE_DERIV_OAUTH_CLIENT_ID` is only a public setup-screen hint; server-side OAuth uses the non-VITE variables. Redeploy after changing environment variables.
 
 ## Run locally (Node.js 20+)
 ```bash
@@ -71,6 +71,5 @@ Research starter, not financial advice or a profitable-strategy claim. Risk limi
 - The workflow connects to Deriv's public WebSocket and requests recent `R_100` candles, validating the response shape used by the market feed. A failed check marks the workflow failed; it does not change trading behavior.
 - Compatible npm dependency updates are tested with `npm test`, `npm run typecheck`, and `npm run build`, then proposed in a pull request for review. No dependency update is auto-merged or automatically deployed.
 - Dependabot checks npm dependencies daily and GitHub Actions versions weekly, proposing separate pull requests.
-- Set the repository Actions variable `DERIV_APP_ID` to your registered public Deriv app ID if needed; the workflow otherwise uses the public-feed fallback ID. This check needs no account token.
 
 **Scope:** This is scheduled maintenance and API compatibility monitoring, not a system that can predict or automatically implement every Deriv API change. It does not rewrite the bot's strategies or risk limits, authenticate a trading account, or enable real-money trading. Review API-change alerts and update code deliberately when Deriv changes its protocol. Keep demo testing and the existing live-trading lock in place.
