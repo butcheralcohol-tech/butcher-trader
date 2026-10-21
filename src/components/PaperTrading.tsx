@@ -17,19 +17,21 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
   const [strategyIds, setStrategyIds] = useState<string[]>(strategies.slice(0, 3).map(s => s.id));
   const [consensusPercent, setConsensusPercent] = useState(60);
   const [balance, setBalance] = useState(TRADING_POLICY.startingBalanceUsd);
-  const [sessionLossCap, setSessionLossCap] = useState(TRADING_POLICY.sessionLossLimitUsd);
+  const [sessionLossCap, setSessionLossCap] = useState<number>(TRADING_POLICY.sessionLossLimitUsd);
+  const [tradeProfitTarget, setTradeProfitTarget] = useState<number>(10);
+  const [sessionProfitTarget, setSessionProfitTarget] = useState<number>(TRADING_POLICY.dailyProfitTargetUsd);
   const [manualStopPercent, setManualStopPercent] = useState(0.5);
   const [manualRewardRisk, setManualRewardRisk] = useState(2);
 
   const begin = () => {
-    if (!strategyIds.length || !Number.isFinite(balance) || balance < TRADING_POLICY.minimumStartingBalanceUsd || !Number.isFinite(sessionLossCap) || sessionLossCap <= 0) return;
+    if (!strategyIds.length || !Number.isFinite(balance) || balance < TRADING_POLICY.minimumStartingBalanceUsd || !Number.isFinite(sessionLossCap) || sessionLossCap <= 0 || !Number.isFinite(tradeProfitTarget) || tradeProfitTarget <= 0 || !Number.isFinite(sessionProfitTarget) || sessionProfitTarget <= 0) return;
     const selected = strategies.filter(s => strategyIds.includes(s.id));
     const first = selected[0];
     start({
       symbol, granularity, strategyId: first.id, params: defaultParams(first),
       strategyIds: selected.map(s => s.id),
       strategyParams: Object.fromEntries(selected.map(s => [s.id, defaultParams(s)])),
-      consensusPercent, cfg: { ...DEFAULT_SIM, riskPercent: TRADING_POLICY.riskPercent, dailyLossLimitPercent: TRADING_POLICY.dailyLossLimitPercent, dailyLossLimitAmount: TRADING_POLICY.dailyLossLimitsUsd.SYNTHETIC, sessionLossLimitAmount: sessionLossCap, dailyProfitTargetAmount: TRADING_POLICY.dailyProfitTargetUsd }, startedAt: Date.now(),
+      consensusPercent, cfg: { ...DEFAULT_SIM, riskPercent: TRADING_POLICY.riskPercent, dailyLossLimitPercent: TRADING_POLICY.dailyLossLimitPercent, dailyLossLimitAmount: TRADING_POLICY.dailyLossLimitsUsd.SYNTHETIC, sessionLossLimitAmount: sessionLossCap, dailyProfitTargetAmount: TRADING_POLICY.dailyProfitTargetUsd, tradeProfitTargetAmount: tradeProfitTarget, sessionProfitTargetAmount: sessionProfitTarget }, startedAt: Date.now(),
     }, balance);
   };
   const toggleStrategy = (id: string, checked: boolean) => setStrategyIds(current =>
@@ -43,6 +45,8 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
       <div className="fields four">
         <label>Starting demo stake / balance ($)<input type="number" min={TRADING_POLICY.minimumStartingBalanceUsd} step="10" value={balance} onChange={e => setBalance(Number(e.target.value))} /></label>
         <label>Session loss cap ($)<input type="number" min="1" step="1" value={sessionLossCap} onChange={e => setSessionLossCap(Number(e.target.value))} /></label>
+        <label>Profit target per trade ($)<input type="number" min="0.01" step="1" value={tradeProfitTarget} onChange={e => setTradeProfitTarget(Number(e.target.value))} /></label>
+        <label>Profit target per session ($)<input type="number" min="0.01" step="1" value={sessionProfitTarget} onChange={e => setSessionProfitTarget(Number(e.target.value))} /></label>
         <label>Market<select value={symbol} onChange={e => setSymbol(e.target.value)}>{MARKETS.map(m => <option key={m.symbol} value={m.symbol}>{m.name}</option>)}</select></label>
         <label>Timeframe<select value={granularity} onChange={e => setGranularity(Number(e.target.value))}>{GRANULARITIES.map(g => <option key={g.seconds} value={g.seconds}>{g.label}</option>)}</select></label>
         <label>Directional consensus<select value={consensusPercent} onChange={e => setConsensusPercent(Number(e.target.value))}><option value={50}>50% — simple majority</option><option value={60}>60% — balanced</option><option value={75}>75% — strict</option><option value={100}>100% — unanimous</option></select></label>
@@ -53,7 +57,7 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
         <h4>{strategy.name}</h4><p>{strategy.description}</p><div className="bot-card-foot"><span>{strategy.params.length} parameters · ATR risk levels</span><span>{strategyIds.includes(strategy.id) ? "ACTIVE VOTE" : "STANDBY"}</span></div>
       </article>)}</div>
       <p className="hint">The configured policy requests weighted strategy scoring, but the current paper engine still uses consensus voting; weighted scoring is not yet implemented. A strategy that emits no signal contributes no directional vote. Conflicting or insufficient votes produce no trade.</p>
-      <button className="primary-btn" disabled={!strategyIds.length || !Number.isFinite(balance) || balance < TRADING_POLICY.minimumStartingBalanceUsd || !Number.isFinite(sessionLossCap) || sessionLossCap <= 0} onClick={begin}><Play size={14} /> Start multi-strategy paper bot</button>
+      <button className="primary-btn" disabled={!strategyIds.length || !Number.isFinite(balance) || balance < TRADING_POLICY.minimumStartingBalanceUsd || !Number.isFinite(sessionLossCap) || sessionLossCap <= 0 || !Number.isFinite(tradeProfitTarget) || tradeProfitTarget <= 0 || !Number.isFinite(sessionProfitTarget) || sessionProfitTarget <= 0} onClick={begin}><Play size={14} /> Start multi-strategy paper bot</button>
     </section></div>;
 
   const { state, meta } = session;
@@ -69,6 +73,8 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
         <div className="metric"><small>VIRTUAL BALANCE</small><b>{money(state.balance)}</b></div>
         <div className={`metric ${pnl > 0 ? "up" : pnl < 0 ? "down" : ""}`}><small>SESSION P&amp;L</small><b>{signedMoney(pnl)}</b></div>
         <div className={`metric ${state.dayPnl < 0 ? "down" : ""}`}><small>TODAY (UTC)</small><b>{signedMoney(state.dayPnl)}</b></div>
+        <div className="metric"><small>TRADE PROFIT TARGET</small><b>{money(meta.cfg.tradeProfitTargetAmount ?? 10)}</b></div>
+        <div className="metric"><small>SESSION PROFIT TARGET</small><b>{money(meta.cfg.sessionProfitTargetAmount ?? TRADING_POLICY.dailyProfitTargetUsd)}</b></div>
         <div className="metric"><small>TRADES</small><b>{state.trades.length}{state.trades.length ? ` · ${Math.round((wins / state.trades.length) * 100)}% win` : ""}</b></div>
         <div className="metric"><small>BLOCKED BY GATE</small><b>{state.blockedSignals}</b></div>
         <div className="metric"><small>SESSION LOSS CAP</small><b>{money(meta.cfg.sessionLossLimitAmount ?? TRADING_POLICY.sessionLossLimitUsd)}</b></div>
@@ -97,6 +103,6 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
       <div className="table-wrap tall"><table><thead><tr><th>Candle time</th><th>Event</th><th>Detail</th></tr></thead>
         <tbody>{[...state.events].reverse().slice(0, 120).map((e, i) => <tr key={i}><td>{clock(e.time)}</td><td><span className={`tag ${e.type.toLowerCase()}`}>{e.type.replace("_", " ")}</span></td><td>{e.message}</td></tr>)}
           {!state.events.length && <tr><td colSpan={3}>No events yet.</td></tr>}</tbody></table></div></section>
-    <section className="warning-note"><b>Execution status</b><p>This version automatically executes the selected strategy ensemble in the virtual portfolio only. Real Deriv orders are still blocked because authenticated trading WebSocket handling, demo-account order verification, durable server-side risk enforcement and idempotent order reconciliation have not yet passed integration tests. A session cap only blocks new paper entries; open positions may still lose more due to gaps/slippage. Do not treat paper fills as broker fills.</p></section>
+    <section className="warning-note"><b>Execution status</b><p>This version automatically executes the selected strategy ensemble in the virtual portfolio only. Real Deriv orders are still blocked because authenticated trading WebSocket handling, demo-account order verification, durable server-side risk enforcement and idempotent order reconciliation have not yet passed integration tests. Profit-target exits are evaluated from candle highs/lows and are simulated; real fills can differ. A session loss cap only blocks new paper entries; open positions may still lose more due to gaps/slippage. Do not treat paper fills as broker fills.</p></section>
   </div>;
 }
