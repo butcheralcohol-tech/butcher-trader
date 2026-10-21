@@ -18,6 +18,33 @@ export type PaperMeta = {
 export type PaperSession = { version: 1; meta: PaperMeta; state: SimState };
 
 export const MAX_REPLAY = 3;
+
+/** Queue a user-directed paper order at a recent price. It remains virtual and is risk-checked again on fill. */
+export function queueManualPaperSignal(
+  session: PaperSession,
+  side: "LONG" | "SHORT",
+  referencePrice: number,
+  stopPercent: number,
+  rewardRisk: number,
+): PaperSession | null {
+  if (!Number.isFinite(referencePrice) || referencePrice <= 0 ||
+      !Number.isFinite(stopPercent) || stopPercent < 0.1 || stopPercent > 5 ||
+      !Number.isFinite(rewardRisk) || rewardRisk < 1 || rewardRisk > 5 ||
+      session.state.position || session.state.pending || session.state.lastCandleTime <= 0) return null;
+  const state = structuredClone(session.state);
+  const distance = referencePrice * stopPercent / 100;
+  const stop = side === "LONG" ? referencePrice - distance : referencePrice + distance;
+  const target = side === "LONG" ? referencePrice + distance * rewardRisk : referencePrice - distance * rewardRisk;
+  state.pending = {
+    side, stop, target, signalTime: state.lastCandleTime,
+    reason: `Manual paper ${side}; stop ${stopPercent}% from reference, target ${rewardRisk}:1 reward/risk.`,
+  };
+  state.events.push({
+    time: state.lastCandleTime, type: "SIGNAL",
+    message: `Manual PAPER ${side} queued near ${referencePrice.toFixed(referencePrice >= 100 ? 2 : 4)}; fill is pending next candle open and must pass risk gate.`,
+  });
+  return { ...session, state };
+}
 const MAX_EVENTS = 500, MAX_TRADES = 300;
 
 export const newSession = (meta: PaperMeta, balance: number): PaperSession => {
