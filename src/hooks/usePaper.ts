@@ -38,15 +38,12 @@ export function usePaper() {
   const start = useCallback((meta: PaperMeta, balance: number) => setSession(newSession(meta, balance)), []);
   const manualTrade = useCallback((side: Side, stopPercent: number, rewardRisk: number) => {
     const price = candles[candles.length - 1]?.close;
-    if (!Number.isFinite(price) || !price || price <= 0) return false;
-    let queued = false;
+    if (!Number.isFinite(price) || !price || price <= 0) return;
     setSession(prev => {
       if (!prev) return prev;
       const next = queueManualPaperSignal(prev, side, price, stopPercent, rewardRisk);
-      queued = Boolean(next);
       return next ?? prev;
     });
-    return queued;
   }, [candles]);
   const reset = useCallback(() => setSession(null), []);
   return { session, info, candles, start, reset, manualTrade };
