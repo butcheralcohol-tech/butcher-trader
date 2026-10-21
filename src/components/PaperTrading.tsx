@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Download, Play, RotateCcw, ScrollText } from "lucide-react";
 import { GRANULARITIES } from "../../shared/candles.js";
 import { DEFAULT_SIM } from "../../shared/sim.js";
+import { TRADING_POLICY } from "../../shared/trading-config.js";
 import { defaultParams, getStrategy, strategies } from "../../shared/strategy.js";
 import { clock, clockSeconds, downloadText, eventsToCsv, fmt, money, signedMoney } from "../lib/format";
 import { MARKETS } from "../lib/markets";
@@ -15,7 +16,7 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
   const [granularity, setGranularity] = useState(60);
   const [strategyIds, setStrategyIds] = useState<string[]>(strategies.slice(0, 3).map(s => s.id));
   const [consensusPercent, setConsensusPercent] = useState(60);
-  const [balance, setBalance] = useState(1000);
+  const [balance, setBalance] = useState(TRADING_POLICY.startingBalanceUsd);
   const [manualStopPercent, setManualStopPercent] = useState(0.5);
   const [manualRewardRisk, setManualRewardRisk] = useState(2);
 
@@ -27,7 +28,7 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
       symbol, granularity, strategyId: first.id, params: defaultParams(first),
       strategyIds: selected.map(s => s.id),
       strategyParams: Object.fromEntries(selected.map(s => [s.id, defaultParams(s)])),
-      consensusPercent, cfg: { ...DEFAULT_SIM }, startedAt: Date.now(),
+      consensusPercent, cfg: { ...DEFAULT_SIM, riskPercent: TRADING_POLICY.riskPercent, dailyLossLimitPercent: TRADING_POLICY.dailyLossLimitPercent, dailyLossLimitAmount: TRADING_POLICY.dailyLossLimitUsd, dailyProfitTargetAmount: TRADING_POLICY.dailyProfitTargetUsd }, startedAt: Date.now(),
     }, Math.max(10, balance));
   };
   const toggleStrategy = (id: string, checked: boolean) => setStrategyIds(current =>
@@ -49,7 +50,7 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
         <div className="bot-card-top"><span className="bot-number">MODULE 0{i + 1}</span><label className="bot-mode"><input type="checkbox" checked={strategyIds.includes(strategy.id)} onChange={e => toggleStrategy(strategy.id, e.target.checked)} /> ENABLE</label></div>
         <h4>{strategy.name}</h4><p>{strategy.description}</p><div className="bot-card-foot"><span>{strategy.params.length} parameters · ATR risk levels</span><span>{strategyIds.includes(strategy.id) ? "ACTIVE VOTE" : "STANDBY"}</span></div>
       </article>)}</div>
-      <p className="hint">The default is 3 enabled modules and 60% consensus. A strategy that emits no signal contributes no directional vote, but the threshold is calculated from all enabled modules. Conflicting or insufficient votes produce no trade.</p>
+      <p className="hint">The configured policy requests weighted strategy scoring, but the current paper engine still uses consensus voting; weighted scoring is not yet implemented. A strategy that emits no signal contributes no directional vote. Conflicting or insufficient votes produce no trade.</p>
       <button className="primary-btn" disabled={!strategyIds.length || !Number.isFinite(balance) || balance < 10} onClick={begin}><Play size={14} /> Start multi-strategy paper bot</button>
     </section></div>;
 
@@ -68,7 +69,7 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
         <div className={`metric ${state.dayPnl < 0 ? "down" : ""}`}><small>TODAY (UTC)</small><b>{signedMoney(state.dayPnl)}</b></div>
         <div className="metric"><small>TRADES</small><b>{state.trades.length}{state.trades.length ? ` · ${Math.round((wins / state.trades.length) * 100)}% win` : ""}</b></div>
         <div className="metric"><small>BLOCKED BY GATE</small><b>{state.blockedSignals}</b></div>
-        <div className="metric"><small>CONSENSUS</small><b>{meta.consensusPercent ?? 60}%</b></div>
+        <div className="metric"><small>DAILY STOP / TARGET</small><b>$20 / $40</b></div>
       </div>
       <p className="hint">Enabled modules: {activeStrategies.join(" · ")}. {meta.consensusPercent ?? 60}% consensus required. {info.message}{info.lastDataAt ? ` Last data ${clockSeconds(info.lastDataAt)}.` : ""} The bot only runs while this page is open; session state is stored in this browser. All trades remain simulated.</p>
       <section className="panel manual-trading">
