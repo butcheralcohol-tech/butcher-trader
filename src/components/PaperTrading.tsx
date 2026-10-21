@@ -3,7 +3,6 @@ import { Download, Play, RotateCcw, ScrollText } from "lucide-react";
 import { GRANULARITIES } from "../../shared/candles.js";
 import { DEFAULT_SIM } from "../../shared/sim.js";
 import { TRADING_POLICY } from "../../shared/trading-config.js";
-import { TRADING_POLICY } from "../../shared/trading-config.js";
 import { defaultParams, getStrategy, strategies } from "../../shared/strategy.js";
 import { clock, clockSeconds, downloadText, eventsToCsv, fmt, money, signedMoney } from "../lib/format";
 import { MARKETS } from "../lib/markets";
