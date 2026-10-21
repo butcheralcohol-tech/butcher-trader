@@ -4,6 +4,8 @@ export type RiskConfig = {
   dailyLossLimitPercent: number;
   /** Optional hard currency-denominated cap; use broker-confirmed daily P&L in production. */
   dailyLossLimitAmount?: number;
+  /** Optional daily target at which new entries are paused. */
+  dailyProfitTargetAmount?: number;
   dailyPnl: number;
   openPositions: number;
   maxOpenPositions: number;
@@ -23,11 +25,18 @@ export function evaluateRisk(config: RiskConfig): RiskDecision {
       (!Number.isFinite(config.dailyLossLimitAmount) || config.dailyLossLimitAmount <= 0)) {
     reasons.push("Absolute daily loss limit must be a positive finite amount.");
   }
+  if (config.dailyProfitTargetAmount !== undefined &&
+      (!Number.isFinite(config.dailyProfitTargetAmount) || config.dailyProfitTargetAmount <= 0)) {
+    reasons.push("Daily profit target must be a positive finite amount.");
+  }
   const percentLossLimit = config.balance * config.dailyLossLimitPercent / 100;
   const absoluteLossLimit = config.dailyLossLimitAmount;
   if (!Number.isFinite(config.dailyPnl) || config.dailyPnl <= -percentLossLimit ||
       (absoluteLossLimit !== undefined && config.dailyPnl <= -absoluteLossLimit)) {
     reasons.push("Daily loss limit reached; trading is locked until the next trading day.");
+  }
+  if (config.dailyProfitTargetAmount !== undefined && config.dailyPnl >= config.dailyProfitTargetAmount) {
+    reasons.push("Daily profit target reached; new entries are paused until the next trading day.");
   }
   if (!Number.isInteger(config.openPositions) || config.openPositions < 0) reasons.push("Open position count must be a non-negative integer.");
   if (!Number.isInteger(config.maxOpenPositions) || config.maxOpenPositions < 1 || config.maxOpenPositions > 1) reasons.push("This milestone allows at most one open position.");
