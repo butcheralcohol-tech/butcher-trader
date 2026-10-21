@@ -2,11 +2,11 @@ import { evaluateRisk } from "./risk.js";
 import type { Candle, Side, Signal } from "./types.js";
 
 /** One candle-by-candle execution model shared by the backtester and the paper trader, so both behave identically.
- *  Signals are read at a candle CLOSE and filled at the NEXT candle's OPEN. If stop and target are both touched inside one candle, the stop is assumed first. */
+ * Signals are read at a candle CLOSE and filled at the NEXT candle's OPEN. If stop and target are both touched inside one candle, the stop is assumed first. */
 export type SimConfig = {
   riskPercent: number; dailyLossLimitPercent: number;
-  /** Optional absolute daily caps used by the configured paper bot. */
-  dailyLossLimitAmount?: number; dailyProfitTargetAmount?: number;
+  /** Absolute limits for the paper session and trading day. */
+  dailyLossLimitAmount?: number; sessionLossLimitAmount?: number; dailyProfitTargetAmount?: number;
   feeBps: number; slippageBps: number; maxHoldBars: number; maxLeverage: number; allowShort: boolean;
 };
 export const DEFAULT_SIM: SimConfig = { riskPercent: 0.5, dailyLossLimitPercent: 2, feeBps: 2, slippageBps: 1, maxHoldBars: 50, maxLeverage: 5, allowShort: true };
@@ -32,7 +32,8 @@ export const createState = (balance: number, logEvents = true): SimState => ({
 const log = (s: SimState, time: number, type: AuditType, message: string) => { if (s.logEvents) s.events.push({ time, type, message }); };
 const gate = (s: SimState, cfg: SimConfig) => evaluateRisk({
   balance: s.balance, riskPercent: cfg.riskPercent, dailyLossLimitPercent: cfg.dailyLossLimitPercent,
-  dailyLossLimitAmount: cfg.dailyLossLimitAmount, dailyProfitTargetAmount: cfg.dailyProfitTargetAmount,
+  dailyLossLimitAmount: cfg.dailyLossLimitAmount, sessionLossLimitAmount: cfg.sessionLossLimitAmount,
+  sessionPnl: s.balance - s.startBalance, dailyProfitTargetAmount: cfg.dailyProfitTargetAmount,
   dailyPnl: s.dayPnl, openPositions: s.position ? 1 : 0, maxOpenPositions: 1, liveEnabled: false,
 });
 const px = (n: number) => n.toFixed(Math.abs(n) >= 100 ? 2 : 4);
@@ -77,7 +78,7 @@ function manage(s: SimState, c: Candle, justFilled: boolean, cfg: SimConfig) {
   if (p.bars >= cfg.maxHoldBars) close(s, c.time, c.close * (p.side === "LONG" ? 1 - slip : 1 + slip), "timeout", cfg);
 }
 
-/** Advance the simulation by one CLOSED candle. Pass signalFn = null to manage exits only (no new entries). Mutates `s`. */
+/** Advance the simulation by one CLOSED candle. Pass signalFn = null to manage exits only (no new entries). Mutates s. */
 export function stepCandle(s: SimState, c: Candle, signalFn: (() => Signal | null) | null, cfg: SimConfig): void {
   const day = new Date(c.time * 1000).toISOString().slice(0, 10);
   if (day !== s.dayKey) { s.dayKey = day; s.dayPnl = 0; }
