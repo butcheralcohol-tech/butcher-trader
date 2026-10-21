@@ -30,7 +30,8 @@ test("multi-strategy session records enabled modules and consensus settings", ()
   assert.ok(parseSession(JSON.parse(JSON.stringify(session))));
 });
 
-\ntest("first call only records the starting point and never trades on history", () => {
+
+test("first call only records the starting point and never trades on history", () => {
   const s = advancePaper(newSession(meta, 1000), series(300));
   assert.equal(s.state.trades.length, 0);
   assert.equal(s.state.position, null);
