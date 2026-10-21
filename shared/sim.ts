@@ -83,24 +83,27 @@ function manage(s: SimState, c: Candle, justFilled: boolean, cfg: SimConfig) {
   }
   const direction = p.side === "LONG" ? 1 : -1;
   const favorableExtreme = p.side === "LONG" ? c.high : c.low;
+  const candidates: Array<{ price: number; reason: ExitReason }> = [];
   const tradeTarget = cfg.tradeProfitTargetAmount;
   if (tradeTarget !== undefined && Number.isFinite(tradeTarget) && tradeTarget > 0) {
-    const trigger = profitTargetPrice(p, tradeTarget, cfg.feeBps);
-    if ((p.side === "LONG" && favorableExtreme >= trigger) || (p.side === "SHORT" && favorableExtreme <= trigger)) {
-      close(s, c.time, trigger, "trade-profit-target", cfg);
-      return;
-    }
+    candidates.push({ price: profitTargetPrice(p, tradeTarget, cfg.feeBps), reason: "trade-profit-target" });
   }
   const sessionTarget = cfg.sessionProfitTargetAmount;
   if (sessionTarget !== undefined && Number.isFinite(sessionTarget) && sessionTarget > 0) {
     const realizedSessionPnl = s.balance - s.startBalance;
     const remaining = sessionTarget - realizedSessionPnl;
-    if (remaining <= 0) { close(s, c.time, c.close * (1 - direction * slip), "session-profit-target", cfg); return; }
-    const trigger = profitTargetPrice(p, remaining, cfg.feeBps);
-    if ((p.side === "LONG" && favorableExtreme >= trigger) || (p.side === "SHORT" && favorableExtreme <= trigger)) {
-      close(s, c.time, trigger, "session-profit-target", cfg);
+    if (remaining <= 0) {
+      close(s, c.time, c.close * (1 - direction * slip), "session-profit-target", cfg);
       return;
     }
+    candidates.push({ price: profitTargetPrice(p, remaining, cfg.feeBps), reason: "session-profit-target" });
+  }
+  const hit = candidates
+    .filter(target => p.side === "LONG" ? favorableExtreme >= target.price : favorableExtreme <= target.price)
+    .sort((a, b) => p.side === "LONG" ? a.price - b.price : b.price - a.price)[0];
+  if (hit) {
+    close(s, c.time, hit.price, hit.reason, cfg);
+    return;
   }
   if (p.bars >= cfg.maxHoldBars) close(s, c.time, c.close * (p.side === "LONG" ? 1 - slip : 1 + slip), "timeout", cfg);
 }
