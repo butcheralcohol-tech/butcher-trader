@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { advancePaper, combineStrategySignals, newSession, parseSession, MAX_REPLAY } from "./paper.js";
+import { advancePaper, combineStrategySignals, newSession, parseSession, queueManualPaperSignal, MAX_REPLAY } from "./paper.js";
 import { DEFAULT_SIM } from "./sim.js";
 import { defaultParams, emaCrossRsi } from "./strategy.js";
 import type { Candle } from "./types.js";
@@ -81,4 +81,17 @@ test("persisted sessions are validated before use", () => {
   assert.equal(parseSession({ version: 2 }), null);
   assert.equal(parseSession(null), null);
   assert.equal(parseSession({ ...ok, state: { ...ok.state, balance: "x" } }), null);
+});
+
+test("manual paper orders queue with bounded stop and reward/risk and reject duplicate entries", () => {
+  const started = advancePaper(newSession(meta, 1000), series(300));
+  const long = queueManualPaperSignal(started, "LONG", 100, 0.5, 2);
+  assert.ok(long);
+  assert.equal(long.state.pending?.side, "LONG");
+  assert.equal(long.state.pending?.stop, 99.5);
+  assert.equal(long.state.pending?.target, 101);
+  assert.ok(long.state.events.at(-1)?.message.includes("Manual PAPER LONG"));
+  assert.equal(queueManualPaperSignal(long, "SHORT", 100, 0.5, 2), null);
+  assert.equal(queueManualPaperSignal(started, "LONG", 100, 0.01, 2), null);
+  assert.equal(queueManualPaperSignal(started, "SHORT", 100, 0.5, 6), null);
 });
