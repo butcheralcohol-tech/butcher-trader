@@ -1,6 +1,6 @@
 import { clampParams, defaultParams, getStrategy, strategies, type Params } from "./strategy.js";
 import { createState, stepCandle, type SimConfig, type SimState } from "./sim.js";
-import type { Candle } from "./types.js";
+import type { Candle, Signal } from "./types.js";
 
 /** Demo-only paper trading session. Nothing here talks to a broker account. */
 export type PaperMeta = {
@@ -44,6 +44,27 @@ function consensus(meta: PaperMeta): number {
   return Number.isFinite(value) ? Math.min(100, Math.max(50, value)) : 60;
 }
 
+export function combineStrategySignals(
+  votes: Array<{ name: string; signal: Signal }>,
+  strategyCount: number,
+  consensusPercent = 60,
+): Signal | null {
+  if (!Number.isInteger(strategyCount) || strategyCount < 1 || !Number.isFinite(consensusPercent)) return null;
+  const threshold = Math.ceil(strategyCount * Math.min(100, Math.max(50, consensusPercent)) / 100);
+  const longs = votes.filter(v => v.signal.side === "LONG");
+  const shorts = votes.filter(v => v.signal.side === "SHORT");
+  const winners = longs.length >= threshold ? longs : shorts.length >= threshold ? shorts : [];
+  if (!winners.length) return null;
+  const side = winners[0].signal.side;
+  const average = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / values.length;
+  return {
+    side,
+    stop: average(winners.map(v => v.signal.stop)),
+    target: average(winners.map(v => v.signal.target)),
+    reason: `Ensemble ${winners.length}/${strategyCount} vote(s) for ${side} (required ${threshold}/${strategyCount}): ${winners.map(v => `${v.name} — ${v.signal.reason}`).join("; ")}`,
+  };
+}
+
 /** Feed CLOSED candles (never the still-forming one). Each candle is processed once, guarded by lastCandleTime, so reconnects cannot double-fill. */
 export function advancePaper(session: PaperSession, closed: Candle[]): PaperSession {
   if (!closed.length) return session;
@@ -79,20 +100,7 @@ export function advancePaper(session: PaperSession, closed: Candle[]): PaperSess
         const signal = evaluate(i);
         return signal ? [{ name: strategy.name, signal }] : [];
       });
-      if (!votes.length) return null;
-      const longs = votes.filter(v => v.signal.side === "LONG");
-      const shorts = votes.filter(v => v.signal.side === "SHORT");
-      const threshold = Math.ceil(ids.length * consensus(meta) / 100);
-      const winners = longs.length >= threshold ? longs : shorts.length >= threshold ? shorts : [];
-      if (!winners.length) return null;
-      const side = winners[0].signal.side;
-      const average = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / values.length;
-      return {
-        side,
-        stop: average(winners.map(v => v.signal.stop)),
-        target: average(winners.map(v => v.signal.target)),
-        reason: `Ensemble ${winners.length}/${ids.length} vote(s) for ${side} (required ${threshold}/${ids.length}): ${winners.map(v => `${v.name} — ${v.signal.reason}`).join("; ")}`,
-      };
+      return combineStrategySignals(votes, ids.length, consensus(meta));
     }, meta.cfg);
   });
   if (state.events.length > MAX_EVENTS) state.events = state.events.slice(-MAX_EVENTS);
