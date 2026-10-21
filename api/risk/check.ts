@@ -12,26 +12,29 @@ export async function POST(request: Request): Promise<Response> {
   const parsed = parseRiskInput(body);
   if (!parsed.ok) return Response.json({ allowed: false, reasons: parsed.reasons, maxRiskAmount: 0 }, { status: 400 });
 
-  // The browser cannot loosen the configured percentage or dollar loss cap.
-  // dailyPnl/balance are still request inputs, so this endpoint is a demo
-  // pre-trade check, NOT a broker-authoritative live trading authorization.
+  // Enforce fixed policy values server-side. The supplied balance and P&L are
+  // still user-provided; this is a demo risk check, not broker-authoritative
+  // authorization. No order endpoint currently consumes this decision.
   const decision = evaluateRisk({
     ...parsed.value,
     riskPercent: TRADING_POLICY.riskPercent,
     dailyLossLimitPercent: TRADING_POLICY.dailyLossLimitPercent,
     dailyLossLimitAmount: TRADING_POLICY.dailyLossLimitUsd,
+    dailyProfitTargetAmount: TRADING_POLICY.dailyProfitTargetUsd,
     maxOpenPositions: TRADING_POLICY.maxOpenPositions,
-    liveEnabled: true,
+    liveEnabled: false,
   });
   return Response.json({
     ...decision,
     policy: {
       accountMode: TRADING_POLICY.accountMode,
+      startingBalanceUsd: TRADING_POLICY.startingBalanceUsd,
       riskPercent: TRADING_POLICY.riskPercent,
       dailyLossLimitUsd: TRADING_POLICY.dailyLossLimitUsd,
       dailyProfitTargetUsd: TRADING_POLICY.dailyProfitTargetUsd,
       strategyMethod: TRADING_POLICY.strategyMethod,
+      liveTradingEnabled: false,
     },
-    note: "This endpoint blocks order authorization. Real execution is disabled; supplied balance/P&L are not broker-verified.",
+    note: "Demo pre-trade check only. Balance/P&L are not broker-verified, and this endpoint does not authorize or place broker orders.",
   }, { status: decision.allowed ? 200 : 423 });
 }
