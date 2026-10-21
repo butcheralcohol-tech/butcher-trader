@@ -10,12 +10,14 @@ import type { usePaper } from "../hooks/usePaper";
 type Paper = ReturnType<typeof usePaper>;
 
 export default function PaperTrading({ paper }: { paper: Paper }) {
-  const { session, info, start, reset } = paper;
+  const { session, info, start, reset, manualTrade, candles } = paper;
   const [symbol, setSymbol] = useState<string>("R_100");
   const [granularity, setGranularity] = useState(60);
   const [strategyIds, setStrategyIds] = useState<string[]>(strategies.slice(0, 3).map(s => s.id));
   const [consensusPercent, setConsensusPercent] = useState(60);
   const [balance, setBalance] = useState(1000);
+  const [manualStopPercent, setManualStopPercent] = useState(0.5);
+  const [manualRewardRisk, setManualRewardRisk] = useState(2);
 
   const begin = () => {
     if (!strategyIds.length) return;
@@ -69,6 +71,21 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
         <div className="metric"><small>CONSENSUS</small><b>{meta.consensusPercent ?? 60}%</b></div>
       </div>
       <p className="hint">Enabled modules: {activeStrategies.join(" · ")}. {meta.consensusPercent ?? 60}% consensus required. {info.message}{info.lastDataAt ? ` Last data ${clockSeconds(info.lastDataAt)}.` : ""} The bot only runs while this page is open; session state is stored in this browser. All trades remain simulated.</p>
+      <section className="panel manual-trading">
+        <div className="card-title"><b>Manual trading</b><span className="card-status">PAPER ONLY</span></div>
+        <p className="hint">Place a direction manually using the latest market quote. The order is queued for the next candle open, then checked by the same position and daily-loss risk gates. No Deriv account order is sent.</p>
+        <div className="fields four">
+          <label>Stop distance (%)<input type="number" min={0.1} max={5} step={0.1} value={manualStopPercent} onChange={e => setManualStopPercent(Number(e.target.value))} /></label>
+          <label>Target reward/risk<select value={manualRewardRisk} onChange={e => setManualRewardRisk(Number(e.target.value))}><option value={1}>1:1</option><option value={1.5}>1.5:1</option><option value={2}>2:1</option><option value={3}>3:1</option><option value={4}>4:1</option><option value={5}>5:1</option></select></label>
+          <label>Reference price<input value={candles.length ? fmt(candles[candles.length - 1].close) : "Waiting for live quote"} readOnly /></label>
+        </div>
+        <div className="btn-row">
+          <button className="primary-btn" disabled={!live || !candles.length || Boolean(state.position || state.pending) || manualStopPercent < 0.1 || manualStopPercent > 5} onClick={() => manualTrade("LONG", manualStopPercent, manualRewardRisk)}>Manual LONG</button>
+          <button className="ghost-btn danger" disabled={!live || !candles.length || Boolean(state.position || state.pending) || manualStopPercent < 0.1 || manualStopPercent > 5} onClick={() => manualTrade("SHORT", manualStopPercent, manualRewardRisk)}>Manual SHORT</button>
+        </div>
+        <p className="hint">Buttons remain disabled unless the feed is live and no paper position or pending entry exists. Allowed stop distance: 0.1–5%; target: 1:1–5:1.</p>
+      </section>
+
       {state.position && <div className="risk-result pass"><b>OPEN PAPER {state.position.side}</b><span>Entry {fmt(state.position.entry)} · stop {fmt(state.position.stop)} · target {fmt(state.position.target)} · risk {money(state.position.risk)}</span><small>{state.position.reason}</small></div>}
       {!state.position && state.pending && <div className="risk-result pass"><b>SIGNAL PENDING</b><span>{state.pending.side} fills at the next candle open.</span><small>{state.pending.reason}</small></div>}
       <div className="btn-row"><button className="ghost-btn" onClick={() => downloadText(`paper-audit-${meta.symbol}.csv`, eventsToCsv(state.events))}><Download size={13} /> Export audit log</button>
