@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { advancePaper, newSession, parseSession, MAX_REPLAY } from "./paper.js";
+import { advancePaper, combineStrategySignals, newSession, parseSession, MAX_REPLAY } from "./paper.js";
 import { DEFAULT_SIM } from "./sim.js";
 import { defaultParams, emaCrossRsi } from "./strategy.js";
 import type { Candle } from "./types.js";
@@ -13,6 +13,22 @@ const metaBase = { symbol: "R_100", granularity: 60, strategyId: emaCrossRsi.id,
 const meta = metaBase;
 
 
+
+
+test("ensemble combines majority signals and rejects conflicting votes", () => {
+  const votes = [
+    { name: "EMA", signal: { side: "LONG" as const, stop: 95, target: 110, reason: "trend up" } },
+    { name: "Breakout", signal: { side: "LONG" as const, stop: 96, target: 112, reason: "range break" } },
+    { name: "Reversion", signal: { side: "SHORT" as const, stop: 105, target: 90, reason: "overbought" } },
+  ];
+  const combined = combineStrategySignals(votes, 3, 60);
+  assert.equal(combined?.side, "LONG");
+  assert.equal(combined?.stop, 95.5);
+  assert.equal(combined?.target, 111);
+  assert.ok(combined?.reason.includes("2/3 vote(s)"));
+  assert.equal(combineStrategySignals(votes.slice(0, 2), 3, 75), null);
+  assert.equal(combineStrategySignals([], 3, 60), null);
+});
 
 test("multi-strategy session records enabled modules and consensus settings", () => {
   const ids = ["ema-cross-rsi", "rsi-reversion", "donchian-breakout"];
