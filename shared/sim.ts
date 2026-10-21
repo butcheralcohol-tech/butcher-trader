@@ -5,6 +5,8 @@ import type { Candle, Side, Signal } from "./types.js";
  *  Signals are read at a candle CLOSE and filled at the NEXT candle's OPEN. If stop and target are both touched inside one candle, the stop is assumed first. */
 export type SimConfig = {
   riskPercent: number; dailyLossLimitPercent: number;
+  /** Optional absolute daily caps used by the configured paper bot. */
+  dailyLossLimitAmount?: number; dailyProfitTargetAmount?: number;
   feeBps: number; slippageBps: number; maxHoldBars: number; maxLeverage: number; allowShort: boolean;
 };
 export const DEFAULT_SIM: SimConfig = { riskPercent: 0.5, dailyLossLimitPercent: 2, feeBps: 2, slippageBps: 1, maxHoldBars: 50, maxLeverage: 5, allowShort: true };
@@ -29,8 +31,9 @@ export const createState = (balance: number, logEvents = true): SimState => ({
 
 const log = (s: SimState, time: number, type: AuditType, message: string) => { if (s.logEvents) s.events.push({ time, type, message }); };
 const gate = (s: SimState, cfg: SimConfig) => evaluateRisk({
-  balance: s.balance, riskPercent: cfg.riskPercent, dailyLossLimitPercent: cfg.dailyLossLimitPercent, dailyPnl: s.dayPnl,
-  openPositions: s.position ? 1 : 0, maxOpenPositions: 1, liveEnabled: false,
+  balance: s.balance, riskPercent: cfg.riskPercent, dailyLossLimitPercent: cfg.dailyLossLimitPercent,
+  dailyLossLimitAmount: cfg.dailyLossLimitAmount, dailyProfitTargetAmount: cfg.dailyProfitTargetAmount,
+  dailyPnl: s.dayPnl, openPositions: s.position ? 1 : 0, maxOpenPositions: 1, liveEnabled: false,
 });
 const px = (n: number) => n.toFixed(Math.abs(n) >= 100 ? 2 : 4);
 
