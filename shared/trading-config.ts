@@ -1,15 +1,21 @@
 /**
  * Default policy for the next BUTCHER TRADER milestone.
- * Live order execution remains hard-disabled until OAuth, demo order testing,
- * server-side authorization, and explicit safety review are complete.
+ * Demo-only. Real order execution remains hard-disabled until authenticated
+ * broker order flow, account selection, reconciliation, and risk enforcement
+ * have been integration-tested.
  */
 export const TRADING_POLICY = Object.freeze({
   markets: ["SYNTHETIC", "FOREX"] as const,
-  mode: "LIVE_PREPARATION_DEMO_LOCKED" as const,
+  mode: "DEMO_ONLY" as const,
+  accountMode: "demo" as const,
+  startingBalanceUsd: 1000,
+  dailyProfitTargetUsd: 40,
+  dailyLossLimitUsd: 20,
   riskPercent: 1,
-  dailyLossLimitPercent: 3,
+  dailyLossLimitPercent: 2,
   dailyLossAction: "PAUSE_UNTIL_NEXT_DAY" as const,
   maxOpenPositions: 1,
+  strategyMethod: "weighted" as const,
   liveTradingEnabled: false as const,
   demoTestingRequired: true as const,
   authorizationRequired: true as const,
