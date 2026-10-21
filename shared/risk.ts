@@ -18,7 +18,7 @@ export function evaluateRisk(config:RiskConfig):RiskDecision {
  if(!Number.isFinite(config.dailyPnl)||reached) reasons.push("Daily loss limit reached; trading is locked until the next trading day.");
  if(config.sessionLossLimitAmount!==undefined && (!Number.isFinite(config.sessionPnl) || config.sessionPnl!<=-config.sessionLossLimitAmount)) reasons.push("Session loss cap reached; no new entries are allowed for this session.");
  if(config.dailyProfitTargetAmount!==undefined&&config.dailyPnl>=config.dailyProfitTargetAmount) reasons.push("Daily profit target reached; new entries are paused until the next trading day.");
- if(config.sessionProfitTargetAmount!==undefined&&Number.isFinite(config.sessionPnl)&&config.sessionPnl>=config.sessionProfitTargetAmount) reasons.push("Session profit target reached; the session is paused and no new entries are allowed.");
+ if(config.sessionProfitTargetAmount!==undefined&&Number.isFinite(config.sessionPnl)&&config.sessionPnl!>=config.sessionProfitTargetAmount) reasons.push("Session profit target reached; the session is paused and no new entries are allowed.");
  if(!Number.isInteger(config.openPositions)||config.openPositions<0) reasons.push("Open position count must be a non-negative integer.");
  if(!Number.isInteger(config.maxOpenPositions)||config.maxOpenPositions<1||config.maxOpenPositions>1) reasons.push("This milestone allows at most one open position.");
  if(config.openPositions>=config.maxOpenPositions) reasons.push("Maximum open positions reached.");
