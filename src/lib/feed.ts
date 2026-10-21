@@ -5,13 +5,15 @@ export type FeedStatus = "CONNECTING" | "LIVE" | "RECONNECTING" | "ERROR" | "STO
 export type FeedInfo = { status: FeedStatus; message: string; attempt: number; lastDataAt: number | null };
 type SocketLike = Pick<WebSocket, "send" | "close" | "readyState"> & { onopen: ((e: Event) => void) | null; onmessage: ((e: MessageEvent) => void) | null; onerror: ((e: Event) => void) | null; onclose: ((e: CloseEvent) => void) | null };
 
-export const DERIV_WS = "wss://ws.derivws.com/websockets/v3";
+export const DERIV_WS = "wss://api.derivws.com/trading/v1/options/ws/public";
+export const DERIV_WS_LEGACY = "wss://ws.derivws.com/websockets/v3";
 export const DERIV_WS_FALLBACK = "wss://ws.binaryws.com/websockets/v3";
-// Both endpoints are documented Deriv public API hosts. Rotate on retries so a
-// network/edge-specific failure on one host does not leave the feed permanently down.
+// Prefer Deriv's newer unauthenticated public market-data WebSocket. The legacy
+// endpoints remain fallbacks; public market-data calls do not require OAuth.
 const wsUrl = (appId: string, attempt = 0) => {
-  const endpoint = attempt % 2 === 0 ? DERIV_WS : DERIV_WS_FALLBACK;
-  return `${endpoint}?app_id=${encodeURIComponent(appId)}`;
+  const endpoints = [DERIV_WS, DERIV_WS_LEGACY, DERIV_WS_FALLBACK];
+  const endpoint = endpoints[attempt % endpoints.length];
+  return endpoint === DERIV_WS ? endpoint : `${endpoint}?app_id=${encodeURIComponent(appId)}`;
 };
 export const defaultAppId = () => String(import.meta.env.VITE_DERIV_APP_ID || "1089");
 
