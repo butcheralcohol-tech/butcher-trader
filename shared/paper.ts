@@ -1,6 +1,6 @@
 import { clampParams, defaultParams, getStrategy, strategies, type Params } from "./strategy.js";
 import { createState, stepCandle, type SimConfig, type SimState } from "./sim.js";
-import type { Candle, Signal } from "./types.js";
+import type { Candle } from "./types.js";
 
 /** Demo-only paper trading session. Nothing here talks to a broker account. */
 export type PaperMeta = {
@@ -42,31 +42,6 @@ function selectedIds(meta: PaperMeta): string[] {
 function consensus(meta: PaperMeta): number {
   const value = Number(meta.consensusPercent ?? 60);
   return Number.isFinite(value) ? Math.min(100, Math.max(50, value)) : 60;
-}
-
-/** Signals vote only on closed candles. No trade unless one direction reaches the configured share of all enabled strategies. */
-function ensembleSignal(meta: PaperMeta, candles: Candle[], index: number): Signal | null {
-  const ids = selectedIds(meta);
-  const votes = ids.flatMap(id => {
-    const strategy = getStrategy(id);
-    const params = meta.strategyParams?.[id] ?? (id === meta.strategyId ? meta.params : defaultParams(strategy));
-    const signal = strategy.create(candles, clampParams(strategy, params))(index);
-    return signal ? [{ id, name: strategy.name, signal }] : [];
-  });
-  if (!votes.length) return null;
-  const longs = votes.filter(v => v.signal.side === "LONG");
-  const shorts = votes.filter(v => v.signal.side === "SHORT");
-  const threshold = Math.ceil(ids.length * consensus(meta) / 100);
-  const winners = longs.length >= threshold ? longs : shorts.length >= threshold ? shorts : [];
-  if (!winners.length) return null;
-  const side = winners[0].signal.side;
-  const average = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / values.length;
-  return {
-    side,
-    stop: average(winners.map(v => v.signal.stop)),
-    target: average(winners.map(v => v.signal.target)),
-    reason: `Ensemble ${winners.length}/${ids.length} vote(s) for ${side} (required ${threshold}/${ids.length}): ${winners.map(v => `${v.name} — ${v.signal.reason}`).join("; ")}`,
-  };
 }
 
 /** Feed CLOSED candles (never the still-forming one). Each candle is processed once, guarded by lastCandleTime, so reconnects cannot double-fill. */
