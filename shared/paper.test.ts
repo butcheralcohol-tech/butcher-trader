@@ -9,9 +9,28 @@ const series = (n: number, start = 0): Candle[] => Array.from({ length: n }, (_,
   const t = start + i, p = 100 + Math.sin(t / 6) * 4 + t * 0.02;
   return { time: 1_700_000_000 + t * 60, open: p, high: p + 0.5, low: p - 0.5, close: p + 0.1 };
 });
-const meta = { symbol: "R_100", granularity: 60, strategyId: emaCrossRsi.id, params: defaultParams(emaCrossRsi), cfg: DEFAULT_SIM, startedAt: 0 };
+const metaBase = { symbol: "R_100", granularity: 60, strategyId: emaCrossRsi.id, params: defaultParams(emaCrossRsi), cfg: DEFAULT_SIM, startedAt: 0 };
+const meta = metaBase;
 
-test("first call only records the starting point and never trades on history", () => {
+
+
+test("multi-strategy session records enabled modules and consensus settings", () => {
+  const ids = ["ema-cross-rsi", "rsi-reversion", "donchian-breakout"];
+  const meta = {
+    ...metaBase,
+    strategyIds: ids,
+    strategyParams: Object.fromEntries(ids.map(id => [id, {}])),
+    consensusPercent: 60,
+  };
+  const session = newSession(meta, 1000);
+  assert.deepEqual(session.meta.strategyIds, ids);
+  assert.equal(session.meta.consensusPercent, 60);
+  assert.ok(session.state.events[0].message.includes("Multi-strategy paper bot armed"));
+  assert.ok(session.state.events[0].message.includes("60% directional consensus"));
+  assert.ok(parseSession(JSON.parse(JSON.stringify(session))));
+});
+
+\ntest("first call only records the starting point and never trades on history", () => {
   const s = advancePaper(newSession(meta, 1000), series(300));
   assert.equal(s.state.trades.length, 0);
   assert.equal(s.state.position, null);
