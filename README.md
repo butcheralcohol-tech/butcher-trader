@@ -14,7 +14,7 @@ Standalone React + TypeScript trading research dashboard. The frontend is built 
 - **Manual trading desk**: live candle chart and selectable market/timeframe, with virtual LONG/SHORT entries and manual exits. This is a simplified spot-style simulation, not a Deriv contract, and sends no broker orders.
 - **Deriv OAuth 2.0**: server-side Authorization Code + PKCE flow, state validation, encrypted short-lived HTTP-only session cookie, connection status endpoint and logout. OAuth login does not place orders.
 - Demo-only: the multi-strategy robot automatically executes trades in its virtual paper portfolio. **Real Deriv order execution is still not implemented and remains blocked.**
-- Risk gate: maximum 1% planned risk per trade, maximum 3% daily-loss cap (dashboard defaults to 2%), and at most one open position.
+- Configured demo policy: $1,000 starting paper balance; 1% maximum planned risk per trade ($10 at a $1,000 balance); $20 absolute daily loss lock; $40 aspirational daily profit target that pauses new simulated entries when reached; at most one open position. The target is not guaranteed. Server API values fix these policy limits, but its P&L/balance inputs are still client-supplied and are not broker-authoritative.
 - Shared pure logic in `shared/` is used by the Express server, the Vercel functions and the browser, and is covered by unit tests (risk gate, indicators, simulator, backtester incl. a no-look-ahead test, candle parsing, feed reconnect behaviour, paper session).
 
 ## Architecture
@@ -52,7 +52,7 @@ Vercel Functions are request-driven serverless functions, not a persistent alway
 The dashboard uses public/read-only Deriv market data (`ticks_history` with candles, plus a subscription) in the browser; no token is involved. OAuth is implemented with PKCE and a short-lived encrypted HTTP-only cookie. The access token is not returned to browser JavaScript; the app does not yet use it to fetch account data or open an authenticated trading WebSocket. Manual trading is virtual only, and order placement to a broker is not implemented. Never put Deriv API tokens or other secrets in frontend code or commit secrets.
 
 ## Safety
-Research starter, not financial advice or a profitable-strategy claim. Risk limits do not guarantee loss prevention. Real-account execution is intentionally absent. Before any future live mode: implement authenticated Deriv REST/OTP/WebSocket account workflows, instrument allowlists, proposal validation, explicit per-order confirmation, server-side risk enforcement, hard daily stop, durable audit logs, idempotent order handling, integration tests and extended demo forward-testing.
+Research starter, not financial advice or a profitable-strategy claim. Risk limits do not guarantee loss prevention. Real-account execution is intentionally absent. The current paper engine still uses consensus voting; `strategyMethod: "weighted"` is recorded in configuration but weighted signal scoring is not implemented yet. The current risk API is a server-side demo pre-trade check, not a broker-authoritative order guard. Before any future broker execution: implement authenticated Deriv REST/OTP/WebSocket account workflows, select and verify a demo account, reconcile broker-confirmed balance/positions/P&L, enforce the loss lock atomically before each order, instrument allowlists, proposal validation, explicit confirmation, durable audit logs, idempotent order handling, integration tests and extended demo forward-testing.
 
 ## Roadmap
 1. Foundation and risk gate. Done.
