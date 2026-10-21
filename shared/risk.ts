@@ -31,8 +31,10 @@ export function evaluateRisk(config: RiskConfig): RiskDecision {
   }
   const percentLossLimit = config.balance * config.dailyLossLimitPercent / 100;
   const absoluteLossLimit = config.dailyLossLimitAmount;
-  if (!Number.isFinite(config.dailyPnl) || config.dailyPnl <= -percentLossLimit ||
-      (absoluteLossLimit !== undefined && config.dailyPnl <= -absoluteLossLimit)) {
+  const lossLimitReached = absoluteLossLimit !== undefined
+    ? config.dailyPnl <= -absoluteLossLimit
+    : config.dailyPnl <= -percentLossLimit;
+  if (!Number.isFinite(config.dailyPnl) || lossLimitReached) {
     reasons.push("Daily loss limit reached; trading is locked until the next trading day.");
   }
   if (config.dailyProfitTargetAmount !== undefined && config.dailyPnl >= config.dailyProfitTargetAmount) {
