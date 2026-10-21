@@ -17,19 +17,20 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
   const [strategyIds, setStrategyIds] = useState<string[]>(strategies.slice(0, 3).map(s => s.id));
   const [consensusPercent, setConsensusPercent] = useState(60);
   const [balance, setBalance] = useState(TRADING_POLICY.startingBalanceUsd);
+  const [sessionLossCap, setSessionLossCap] = useState(TRADING_POLICY.sessionLossLimitUsd);
   const [manualStopPercent, setManualStopPercent] = useState(0.5);
   const [manualRewardRisk, setManualRewardRisk] = useState(2);
 
   const begin = () => {
-    if (!strategyIds.length) return;
+    if (!strategyIds.length || !Number.isFinite(balance) || balance < TRADING_POLICY.minimumStartingBalanceUsd || !Number.isFinite(sessionLossCap) || sessionLossCap <= 0) return;
     const selected = strategies.filter(s => strategyIds.includes(s.id));
     const first = selected[0];
     start({
       symbol, granularity, strategyId: first.id, params: defaultParams(first),
       strategyIds: selected.map(s => s.id),
       strategyParams: Object.fromEntries(selected.map(s => [s.id, defaultParams(s)])),
-      consensusPercent, cfg: { ...DEFAULT_SIM, riskPercent: TRADING_POLICY.riskPercent, dailyLossLimitPercent: TRADING_POLICY.dailyLossLimitPercent, dailyLossLimitAmount: TRADING_POLICY.dailyLossLimitUsd, dailyProfitTargetAmount: TRADING_POLICY.dailyProfitTargetUsd }, startedAt: Date.now(),
-    }, Math.max(10, balance));
+      consensusPercent, cfg: { ...DEFAULT_SIM, riskPercent: TRADING_POLICY.riskPercent, dailyLossLimitPercent: TRADING_POLICY.dailyLossLimitPercent, dailyLossLimitAmount: TRADING_POLICY.dailyLossLimitsUsd.SYNTHETIC, sessionLossLimitAmount: sessionLossCap, dailyProfitTargetAmount: TRADING_POLICY.dailyProfitTargetUsd }, startedAt: Date.now(),
+    }, balance);
   };
   const toggleStrategy = (id: string, checked: boolean) => setStrategyIds(current =>
     checked ? [...current, id] : current.filter(value => value !== id)
@@ -40,9 +41,10 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
     <section className="panel">
       <p className="hint">Run several strategies together against the live Deriv candle feed. Each strategy votes LONG or SHORT when it has a signal; the bot only queues a paper order when one direction reaches your consensus threshold. All orders are virtual, filled at the next candle open, and pass the shared risk gate. Nothing is sent to a Deriv account.</p>
       <div className="fields four">
+        <label>Starting demo stake / balance ($)<input type="number" min={TRADING_POLICY.minimumStartingBalanceUsd} step="10" value={balance} onChange={e => setBalance(Number(e.target.value))} /></label>
+        <label>Session loss cap ($)<input type="number" min="1" step="1" value={sessionLossCap} onChange={e => setSessionLossCap(Number(e.target.value))} /></label>
         <label>Market<select value={symbol} onChange={e => setSymbol(e.target.value)}>{MARKETS.map(m => <option key={m.symbol} value={m.symbol}>{m.name}</option>)}</select></label>
         <label>Timeframe<select value={granularity} onChange={e => setGranularity(Number(e.target.value))}>{GRANULARITIES.map(g => <option key={g.seconds} value={g.seconds}>{g.label}</option>)}</select></label>
-        <label>Virtual balance ($)<input type="number" min={10} value={balance} onChange={e => setBalance(Number(e.target.value))} /></label>
         <label>Directional consensus<select value={consensusPercent} onChange={e => setConsensusPercent(Number(e.target.value))}><option value={50}>50% — simple majority</option><option value={60}>60% — balanced</option><option value={75}>75% — strict</option><option value={100}>100% — unanimous</option></select></label>
       </div>
       <div className="card-title spaced"><b>Enable strategy modules</b><span className="card-status">{strategyIds.length} OF {strategies.length} SELECTED</span></div>
@@ -51,7 +53,7 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
         <h4>{strategy.name}</h4><p>{strategy.description}</p><div className="bot-card-foot"><span>{strategy.params.length} parameters · ATR risk levels</span><span>{strategyIds.includes(strategy.id) ? "ACTIVE VOTE" : "STANDBY"}</span></div>
       </article>)}</div>
       <p className="hint">The configured policy requests weighted strategy scoring, but the current paper engine still uses consensus voting; weighted scoring is not yet implemented. A strategy that emits no signal contributes no directional vote. Conflicting or insufficient votes produce no trade.</p>
-      <button className="primary-btn" disabled={!strategyIds.length || !Number.isFinite(balance) || balance < 10} onClick={begin}><Play size={14} /> Start multi-strategy paper bot</button>
+      <button className="primary-btn" disabled={!strategyIds.length || !Number.isFinite(balance) || balance < TRADING_POLICY.minimumStartingBalanceUsd || !Number.isFinite(sessionLossCap) || sessionLossCap <= 0} onClick={begin}><Play size={14} /> Start multi-strategy paper bot</button>
     </section></div>;
 
   const { state, meta } = session;
@@ -69,9 +71,9 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
         <div className={`metric ${state.dayPnl < 0 ? "down" : ""}`}><small>TODAY (UTC)</small><b>{signedMoney(state.dayPnl)}</b></div>
         <div className="metric"><small>TRADES</small><b>{state.trades.length}{state.trades.length ? ` · ${Math.round((wins / state.trades.length) * 100)}% win` : ""}</b></div>
         <div className="metric"><small>BLOCKED BY GATE</small><b>{state.blockedSignals}</b></div>
-        <div className="metric"><small>DAILY STOP / TARGET</small><b>$20 / $40</b></div>
+        <div className="metric"><small>SESSION LOSS CAP</small><b>{money(meta.cfg.sessionLossLimitAmount ?? TRADING_POLICY.sessionLossLimitUsd)}</b></div>
       </div>
-      <p className="hint">Enabled modules: {activeStrategies.join(" · ")}. {meta.consensusPercent ?? 60}% consensus required. {info.message}{info.lastDataAt ? ` Last data ${clockSeconds(info.lastDataAt)}.` : ""} The bot only runs while this page is open; session state is stored in this browser. All trades remain simulated.</p>
+      <p className="hint">Enabled modules: {activeStrategies.join(" · ")}. {meta.consensusPercent ?? 60}% consensus required. {info.message}{info.lastDataAt ? ` Last data ${clockSeconds(info.lastDataAt)}.` : " "}The bot only runs while this page is open; session state is stored in this browser. All trades remain simulated.</p>
       <section className="panel manual-trading">
         <div className="card-title"><b>Manual trading</b><span className="card-status">PAPER ONLY</span></div>
         <p className="hint">Place a direction manually using the latest market quote. The order is queued for the next candle open, then checked by the same position and daily-loss risk gates. No Deriv account order is sent.</p>
@@ -86,7 +88,6 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
         </div>
         <p className="hint">Buttons remain disabled unless the feed is live and no paper position or pending entry exists. Allowed stop distance: 0.1–5%; target: 1:1–5:1.</p>
       </section>
-
       {state.position && <div className="risk-result pass"><b>OPEN PAPER {state.position.side}</b><span>Entry {fmt(state.position.entry)} · stop {fmt(state.position.stop)} · target {fmt(state.position.target)} · risk {money(state.position.risk)}</span><small>{state.position.reason}</small></div>}
       {!state.position && state.pending && <div className="risk-result pass"><b>SIGNAL PENDING</b><span>{state.pending.side} fills at the next candle open.</span><small>{state.pending.reason}</small></div>}
       <div className="btn-row"><button className="ghost-btn" onClick={() => downloadText(`paper-audit-${meta.symbol}.csv`, eventsToCsv(state.events))}><Download size={13} /> Export audit log</button>
@@ -96,6 +97,6 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
       <div className="table-wrap tall"><table><thead><tr><th>Candle time</th><th>Event</th><th>Detail</th></tr></thead>
         <tbody>{[...state.events].reverse().slice(0, 120).map((e, i) => <tr key={i}><td>{clock(e.time)}</td><td><span className={`tag ${e.type.toLowerCase()}`}>{e.type.replace("_", " ")}</span></td><td>{e.message}</td></tr>)}
           {!state.events.length && <tr><td colSpan={3}>No events yet.</td></tr>}</tbody></table></div></section>
-    <section className="warning-note"><b>Execution status</b><p>This version automatically executes the selected strategy ensemble in the virtual portfolio only. Real Deriv orders are still blocked because authenticated trading WebSocket handling, demo-account order verification, durable server-side risk enforcement and idempotent order reconciliation have not yet passed integration tests. Do not treat paper fills as broker fills.</p></section>
+    <section className="warning-note"><b>Execution status</b><p>This version automatically executes the selected strategy ensemble in the virtual portfolio only. Real Deriv orders are still blocked because authenticated trading WebSocket handling, demo-account order verification, durable server-side risk enforcement and idempotent order reconciliation have not yet passed integration tests. A session cap only blocks new paper entries; open positions may still lose more due to gaps/slippage. Do not treat paper fills as broker fills.</p></section>
   </div>;
 }
