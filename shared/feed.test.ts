@@ -73,3 +73,20 @@ test("late messages from a replaced socket are ignored", () => {
   assert.equal(seen.length, before);
   feed.stop();
 });
+
+test("after a failure the feed switches to the next endpoint, and the legacy socket gets an app_id", async () => {
+  FakeSocket.all = [];
+  const feed = new DerivFeed({ symbol: "R_100", granularity: 60, appId: "42", endpoints: ["wss://new.example/public", "wss://ws.derivws.com/websockets/v3"], onCandles: () => {}, onInfo: () => {}, wsFactory: u => new FakeSocket(u) as never });
+  feed.start();
+  assert.equal(FakeSocket.all[0].url, "wss://new.example/public");
+  FakeSocket.all[0].onclose?.({} as CloseEvent);
+  await wait(1100);
+  assert.equal(FakeSocket.all[1].url, "wss://ws.derivws.com/websockets/v3?app_id=42");
+  feed.stop();
+});
+
+test("wsUrl only adds app_id to the legacy endpoint", async () => {
+  const { wsUrl, DERIV_WS_PUBLIC, DERIV_WS_LEGACY } = await import("../src/lib/feed.js");
+  assert.equal(wsUrl(DERIV_WS_PUBLIC, "1"), DERIV_WS_PUBLIC);
+  assert.equal(wsUrl(DERIV_WS_LEGACY, "1"), `${DERIV_WS_LEGACY}?app_id=1`);
+});

@@ -5,12 +5,19 @@ export type FeedStatus = "CONNECTING" | "LIVE" | "RECONNECTING" | "ERROR" | "STO
 export type FeedInfo = { status: FeedStatus; message: string; attempt: number; lastDataAt: number | null };
 type SocketLike = Pick<WebSocket, "send" | "close" | "readyState"> & { onopen: ((e: Event) => void) | null; onmessage: ((e: MessageEvent) => void) | null; onerror: ((e: Event) => void) | null; onclose: ((e: CloseEvent) => void) | null };
 
-export const DERIV_WS = "wss://ws.derivws.com/websockets/v3";
-const wsUrl = (appId: string) => `${DERIV_WS}?app_id=${encodeURIComponent(appId)}`;
-export const defaultAppId = () => String(import.meta.env.VITE_DERIV_APP_ID || "1089");
+/** Deriv's new public (no-auth) market-data socket, then the legacy socket as a fallback. Set VITE_DERIV_WS_URL to force a single endpoint. */
+export const DERIV_WS_PUBLIC = "wss://api.derivws.com/trading/v1/options/ws/public";
+export const DERIV_WS_LEGACY = "wss://ws.derivws.com/websockets/v3";
+export const defaultAppId = () => String(import.meta.env?.VITE_DERIV_APP_ID || "1089");
+export const defaultEndpoints = (): string[] => {
+  const forced = String(import.meta.env?.VITE_DERIV_WS_URL || "").trim();
+  return forced ? [forced] : [DERIV_WS_PUBLIC, DERIV_WS_LEGACY];
+};
+/** The legacy socket needs an app_id query parameter; the new public socket does not. */
+export const wsUrl = (endpoint: string, appId: string) => endpoint.includes("ws.derivws.com") ? `${endpoint}?app_id=${encodeURIComponent(appId)}` : endpoint;
 
 export type FeedOptions = {
-  symbol: string; granularity: number; count?: number; appId?: string;
+  symbol: string; granularity: number; count?: number; appId?: string; endpoints?: string[];
   onCandles: (candles: Candle[]) => void; onInfo: (info: FeedInfo) => void;
   staleMs?: number; wsFactory?: (url: string) => SocketLike;
 };
@@ -20,6 +27,7 @@ export class DerivFeed {
   private socket: SocketLike | null = null;
   private candles: Candle[] = [];
   private attempt = 0;
+  private endpointIdx = 0;
   private stopped = true;
   private lastMessageAt = 0;
   private lastDataAt: number | null = null;
@@ -52,7 +60,7 @@ export class DerivFeed {
     this.detach();
     this.info(this.attempt === 0 ? "CONNECTING" : "RECONNECTING", this.attempt === 0 ? "Connecting to Deriv…" : `Reconnecting (attempt ${this.attempt})…`);
     let socket: SocketLike;
-    try { socket = (this.o.wsFactory ?? (u => new WebSocket(u)))(wsUrl(this.o.appId ?? defaultAppId())); }
+    try { socket = (this.o.wsFactory ?? (u => new WebSocket(u)))(wsUrl(this.endpoints()[this.endpointIdx % this.endpoints().length], this.o.appId ?? defaultAppId())); }
     catch { return this.scheduleRetry("Could not open a WebSocket."); }
     this.socket = socket; this.lastMessageAt = Date.now();
     socket.onopen = () => {
@@ -82,6 +90,8 @@ export class DerivFeed {
     socket.onclose = () => { if (this.socket === socket) this.scheduleRetry("Connection closed."); };
   }
 
+  private endpoints() { const e = this.o.endpoints ?? defaultEndpoints(); return e.length ? e : [DERIV_WS_PUBLIC]; }
+
   private markData() { this.lastDataAt = Date.now(); }
 
   private fail(message: string) { this.detach(); this.scheduleRetry(message); }
@@ -89,6 +99,7 @@ export class DerivFeed {
   private scheduleRetry(message: string) {
     if (this.stopped || this.timers.retry) return;
     this.detach(); clearInterval(this.timers.ping);
+    if (this.endpoints().length > 1) this.endpointIdx = (this.endpointIdx + 1) % this.endpoints().length;
     const delay = backoffDelay(this.attempt++);
     this.info("ERROR", `${message} Retrying in ${Math.round(delay / 1000)}s.`);
     this.timers.retry = setTimeout(() => { this.timers.retry = undefined; this.connect(); }, delay);
@@ -101,14 +112,24 @@ export class DerivFeed {
   }
 }
 
-/** One-shot history download (up to 5000 candles) for backtesting. */
-export function fetchCandles(symbol: string, granularity: number, count: number, appId = defaultAppId(), timeoutMs = 20000): Promise<Candle[]> {
+/** One-shot history download (up to 5000 candles) for backtesting. Tries each endpoint in turn. */
+export async function fetchCandles(symbol: string, granularity: number, count: number, appId = defaultAppId(), timeoutMs = 20000, endpoints = defaultEndpoints()): Promise<Candle[]> {
+  let lastError = new Error("Could not reach Deriv.");
+  for (const endpoint of endpoints) {
+    try { return await fetchFrom(wsUrl(endpoint, appId), symbol, granularity, count, timeoutMs); }
+    catch (e) { lastError = e instanceof Error ? e : lastError; }
+  }
+  throw lastError;
+}
+
+function fetchFrom(url: string, symbol: string, granularity: number, count: number, timeoutMs: number): Promise<Candle[]> {
   return new Promise((resolve, reject) => {
-    const socket = new WebSocket(wsUrl(appId));
+    const socket = new WebSocket(url);
     const done = (fn: () => void) => { clearTimeout(timer); socket.onopen = socket.onmessage = socket.onerror = socket.onclose = null; try { socket.close(); } catch { /* noop */ } fn(); };
     const timer = setTimeout(() => done(() => reject(new Error("Timed out loading history."))), timeoutMs);
     socket.onopen = () => socket.send(JSON.stringify({ ticks_history: symbol, adjust_start_time: 1, count: Math.min(5000, count), end: "latest", style: "candles", granularity }));
     socket.onerror = () => done(() => reject(new Error("Could not reach Deriv.")));
+    socket.onclose = () => done(() => reject(new Error("Deriv closed the connection.")));
     socket.onmessage = event => {
       let msg: Record<string, unknown>;
       try { msg = JSON.parse(String(event.data)); } catch { return; }

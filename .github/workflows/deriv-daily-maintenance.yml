@@ -31,57 +31,41 @@ jobs:
           node --input-type=module <<'NODE'
           import WebSocket from "ws";
           const appId = process.env.DERIV_APP_ID;
-          const url = `wss://ws.derivws.com/websockets/v3?app_id=${encodeURIComponent(appId)}`;
-          const ws = new WebSocket(url);
-          const timer = setTimeout(() => {
-            console.error("Deriv API check timed out");
-            ws.terminate();
-            process.exit(1);
-          }, 20000);
-          ws.on("open", () => ws.send(JSON.stringify({
-            ticks_history: "R_100",
-            adjust_start_time: 1,
-            count: 2,
-            end: "latest",
-            style: "candles",
-            granularity: 60,
-            req_id: 1
-          })));
-          ws.on("message", raw => {
-            let data;
-            try { data = JSON.parse(raw.toString()); } catch { return; }
-            if (data.req_id !== 1) return;
-            clearTimeout(timer);
-            if (data.error) {
-              console.error("Deriv API returned an error:", data.error.code, data.error.message);
-              ws.close();
-              process.exitCode = 1;
-              return;
-            }
-            if (!Array.isArray(data.candles) || data.candles.length < 1) {
-              console.error("Unexpected Deriv candle response shape");
-              ws.close();
-              process.exitCode = 1;
-              return;
-            }
-            const candle = data.candles[data.candles.length - 1];
-            for (const key of ["open", "high", "low", "close", "epoch"]) {
-              if (!(key in candle)) {
-                console.error("Candle response missing field:", key);
-                ws.close();
-                process.exitCode = 1;
-                return;
-              }
-            }
-            console.log(`Deriv public candle API OK: ${data.candles.length} candles; latest epoch ${candle.epoch}`);
-            ws.close();
+          // Same order the app uses: new public socket first, legacy socket as fallback.
+          const endpoints = [
+            { name: "new public API", url: "wss://api.derivws.com/trading/v1/options/ws/public" },
+            { name: "legacy API", url: `wss://ws.derivws.com/websockets/v3?app_id=${encodeURIComponent(appId)}` },
+          ];
+          const check = ({ name, url }) => new Promise(resolve => {
+            const ws = new WebSocket(url);
+            let settled = false;
+            const finish = (ok, detail) => { if (settled) return; settled = true; clearTimeout(timer); try { ws.terminate(); } catch {} resolve({ name, ok, detail }); };
+            const timer = setTimeout(() => finish(false, "timed out after 20s"), 20000);
+            ws.on("open", () => ws.send(JSON.stringify({ ticks_history: "R_100", adjust_start_time: 1, count: 2, end: "latest", style: "candles", granularity: 60, req_id: 1 })));
+            ws.on("message", raw => {
+              let data;
+              try { data = JSON.parse(raw.toString()); } catch { return; }
+              if (data.req_id !== 1) return;
+              if (data.error) return finish(false, `API error ${data.error.code}: ${data.error.message}`);
+              const candle = Array.isArray(data.candles) ? data.candles[data.candles.length - 1] : undefined;
+              if (!candle) return finish(false, "unexpected response shape (no candles)");
+              const missing = ["open", "high", "low", "close", "epoch"].filter(k => !(k in candle));
+              if (missing.length) return finish(false, `candle missing fields: ${missing.join(", ")}`);
+              finish(true, `${data.candles.length} candles, latest epoch ${candle.epoch}`);
+            });
+            ws.on("unexpected-response", (_req, res) => finish(false, `HTTP ${res.statusCode}`));
+            ws.on("error", err => finish(false, `connection failed: ${err.message}`));
+            ws.on("close", () => finish(false, "closed before a response"));
           });
-          ws.on("error", err => {
-            clearTimeout(timer);
-            console.error("Deriv WebSocket connection failed:", err.message);
-            process.exitCode = 1;
-          });
-          ws.on("close", () => clearTimeout(timer));
+          const results = [];
+          for (const endpoint of endpoints) {
+            const r = await check(endpoint);
+            results.push(r);
+            console.log(`${r.ok ? "OK  " : "FAIL"} ${r.name}: ${r.detail}`);
+          }
+          if (!results[0].ok && results[1].ok) console.log("::warning::New public Deriv API failed but the legacy API works. The app falls back to legacy; investigate.");
+          if (!results[1].ok && results[0].ok) console.log("::warning::Legacy Deriv API is no longer working; the app is using the new public API.");
+          if (!results.some(r => r.ok)) { console.log("::error::No Deriv candle endpoint is working."); process.exit(1); }
           NODE
 
   dependency-refresh:
