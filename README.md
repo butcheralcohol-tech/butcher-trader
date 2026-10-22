@@ -73,3 +73,6 @@ Research starter, not financial advice or a profitable-strategy claim. Risk limi
 - Dependabot checks npm dependencies daily and GitHub Actions versions weekly, proposing separate pull requests.
 
 **Scope:** This is scheduled maintenance and API compatibility monitoring, not a system that can predict or automatically implement every Deriv API change. It does not rewrite the bot's strategies or risk limits, authenticate a trading account, or enable real-money trading. Review API-change alerts and update code deliberately when Deriv changes its protocol. Keep demo testing and the existing live-trading lock in place.
+
+
+- Set the repository Actions variable `DERIV_APP_ID` to your registered public Deriv app ID if needed; the workflow otherwise uses the public-feed fallback ID. This check needs no account token.
