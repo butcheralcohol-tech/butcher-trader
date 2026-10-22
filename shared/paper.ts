@@ -19,6 +19,24 @@ export type PaperSession = { version: 1; meta: PaperMeta; state: SimState };
 
 export const MAX_REPLAY = 3;
 
+/** Adjust the virtual cash balance only while flat; offset startBalance equally so this deposit/withdrawal does not masquerade as trading P&L. */
+export function adjustPaperBalance(session: PaperSession, newBalance: number): PaperSession | null {
+  if (!Number.isFinite(newBalance) || newBalance < 2 || newBalance > 1_000_000_000 ||
+      session.state.position || session.state.pending) return null;
+  const state = structuredClone(session.state);
+  const delta = newBalance - state.balance;
+  if (Math.abs(delta) < 0.000001) return session;
+  state.balance = newBalance;
+  state.startBalance += delta;
+  state.events.push({
+    time: Math.max(state.lastCandleTime, Math.floor(Date.now() / 1000)),
+    type: "INFO",
+    message: `Virtual balance adjusted by ${delta >= 0 ? "+" : ""}${delta.toFixed(2)}; balance now ${newBalance.toFixed(2)}. Trading P&L baseline adjusted equally.`,
+  });
+  if (state.events.length > MAX_EVENTS) state.events = state.events.slice(-MAX_EVENTS);
+  return { ...session, state };
+}
+
 /** Queue a user-directed paper order at a recent price. It remains virtual and is risk-checked again on fill. */
 export function queueManualPaperSignal(
   session: PaperSession,
