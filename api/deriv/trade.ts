@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
+import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
 import { OAUTH_COOKIE, decryptSession, parseCookies } from "../../shared/oauth-session.js";
 import { evaluateDemoExecutionRisk, type DemoAccount } from "../../shared/demo-execution.js";
@@ -26,8 +27,12 @@ async function redisCommand<T>(command: (string | number)[]): Promise<T | null> 
   if (result.error) throw new Error("Durable risk storage rejected the request.");
   return result.result ?? null;
 }
-async function acquireLock(key: string): Promise<boolean> {
-  return (await redisCommand<string>(["SET", key, "locked", "NX", "EX", 20])) === "OK";
+async function acquireLock(key: string): Promise<string | null> {
+  const owner = randomUUID();
+  return (await redisCommand<string>(["SET", key, owner, "NX", "EX", 120])) === "OK" ? owner : null;
+}
+async function releaseLock(key: string, owner: string): Promise<void> {
+  await redisCommand<number>(["EVAL", "if redis.call(\'get\', KEYS[1]) == ARGV[1] then return redis.call(\'del\', KEYS[1]) else return 0 end", 1, key, owner]);
 }
 async function brokerRequest(token: string, payloads: Record<string, unknown>[]): Promise<DerivReply[]> {
   const appId = process.env.DERIV_APP_ID?.trim() || process.env.VITE_DERIV_APP_ID?.trim();
@@ -127,11 +132,16 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       dailyProfitTargetUsd: 40, riskPercent: 1, openContracts, maxOpenContracts: 1 });
     if (!risk.allowed) { json(res, 423, { error: "Risk checks blocked this order.", reasons: risk.reasons, maxStake: risk.maxStake, dailyNetPnl }); return; }
     const storagePrefix = `butcher:demo:${account.loginid}`;
-    const previous = await redisCommand<string>(["GET", `${storagePrefix}:idempotency:${requestId}`]);
-    if (previous) { json(res, 200, { ...JSON.parse(previous), replayed: true }); return; }
-    const lock = await acquireLock(`${storagePrefix}:execution-lock`);
-    if (!lock) { json(res, 423, { error: "Another order is being processed. Retry only after checking order history." }); return; }
+    const idempotencyKey = storagePrefix + ":idempotency:" + requestId;
+    const previous = await redisCommand<string>(["GET", idempotencyKey]);
+    if (previous) { json(res, 409, { ...JSON.parse(previous), replayed: true, message: "This request key was already used; reconcile broker history before retrying." }); return; }
+    const lockKey = storagePrefix + ":execution-lock";
+    const lockOwner = await acquireLock(lockKey);
+    if (!lockOwner) { json(res, 423, { error: "Another order is being processed. Reconcile order history before retrying." }); return; }
     try {
+      const markerValue = JSON.stringify({ status: "pending_reconciliation", requestId, symbol, contractType, stake, createdAt: new Date().toISOString() });
+      const reserved = await redisCommand<string>(["SET", idempotencyKey, markerValue, "NX", "EX", 86400]);
+      if (reserved !== "OK") { json(res, 409, { error: "This idempotency key has already been reserved; reconcile broker history before retrying." }); return; }
       const proposal = await brokerRequest(session.accessToken, [{ proposal: 1, amount: stake, basis: "stake",
         contract_type: contractType, currency: account.currency, duration: Number(duration), duration_unit: "m", symbol }]);
       const proposalData = proposal[1]?.proposal;
@@ -147,7 +157,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       await redisCommand(["SET", `${storagePrefix}:contract:${receipt.contract_id}`, JSON.stringify(result), "EX", 604800]);
       json(res, 201, result);
     } finally {
-      await redisCommand(["DEL", `${storagePrefix}:execution-lock`]).catch(() => null);
+      await releaseLock(lockKey, lockOwner).catch(() => null);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "Demo execution failed closed.";
