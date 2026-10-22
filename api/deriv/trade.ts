@@ -6,7 +6,6 @@ import { evaluateDemoExecutionRisk, type DemoAccount } from "../../shared/demo-e
 type DerivReply = { req_id?: number; error?: { code?: string; message?: string }; authorize?: Record<string, unknown>;
   proposal?: { id?: string; ask_price?: number; payout?: number; longcode?: string };
   buy?: { contract_id?: number; buy_price?: number; transaction_id?: number } };
-const APP_ORIGIN = "https://butcherfx.vercel.app";
 const json = (res: ServerResponse, status: number, body: unknown) => {
   res.statusCode = status; res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.setHeader("Cache-Control", "no-store"); res.setHeader("Referrer-Policy", "no-referrer");
@@ -77,12 +76,17 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
   if (!session) { json(res, 401, { error: "Connect Deriv again before placing a demo order." }); return; }
   const requestId = typeof req.headers["idempotency-key"] === "string" ? req.headers["idempotency-key"] : "";
   if (!/^[A-Za-z0-9_-]{16,100}$/.test(requestId)) { json(res, 400, { error: "A unique Idempotency-Key (16–100 safe characters) is required." }); return; }
-  let raw = "";
-  try {
-    for await (const chunk of req) { raw += chunk.toString(); if (raw.length > 8192) { json(res, 413, { error: "Request body too large." }); return; } }
-  } catch { json(res, 400, { error: "Unable to read request." }); return; }
   let body: Record<string, unknown>;
-  try { body = JSON.parse(raw || "{}") as Record<string, unknown>; } catch { json(res, 400, { error: "Invalid JSON." }); return; }
+  const parsedBody = (req as IncomingMessage & { body?: unknown }).body;
+  if (parsedBody && typeof parsedBody === "object" && !Array.isArray(parsedBody)) {
+    body = parsedBody as Record<string, unknown>;
+  } else {
+    let raw = "";
+    try {
+      for await (const chunk of req) { raw += chunk.toString(); if (raw.length > 8192) { json(res, 413, { error: "Request body too large." }); return; } }
+    } catch { json(res, 400, { error: "Unable to read request." }); return; }
+    try { body = JSON.parse(raw || "{}") as Record<string, unknown>; } catch { json(res, 400, { error: "Invalid JSON." }); return; }
+  }
   const symbol = typeof body.symbol === "string" ? body.symbol : "";
   const contractType = body.contractType;
   const duration = body.duration;
