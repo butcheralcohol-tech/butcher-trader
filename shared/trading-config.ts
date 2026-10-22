@@ -1,7 +1,7 @@
 export const TRADING_POLICY = Object.freeze({
   markets: ["SYNTHETIC", "FOREX"] as const,
   mode: "DEMO_ONLY" as const, accountMode: "demo" as const,
-  startingBalanceUsd: 1000, minimumStartingBalanceUsd: 10,
+  startingBalanceUsd: 1000, minimumStartingBalanceUsd: 2,
   dailyProfitTargetUsd: 40, minimumDailyProfitTargetUsd: 24,
   dailyLossLimitUsd: 20,
   dailyLossLimitsUsd: Object.freeze({ SYNTHETIC: 20, FOREX: 20 }),
