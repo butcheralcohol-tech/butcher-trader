@@ -16,6 +16,46 @@ export default function ManualTrading() {
   const [stake, setStake] = useState(10);
   const [position, setPosition] = useState<ManualPosition | null>(null);
   const [history, setHistory] = useState<ClosedTrade[]>([]);
+  const [brokerStake, setBrokerStake] = useState(2);
+  const [duration, setDuration] = useState(1);
+  const [brokerBusy, setBrokerBusy] = useState(false);
+  const [brokerMessage, setBrokerMessage] = useState("Connect a Deriv virtual account before placing demo orders.");
+  const [brokerOrders, setBrokerOrders] = useState<Array<Record<string, unknown>>>([]);
+  const [brokerAccount, setBrokerAccount] = useState("");
+  const refreshBrokerOrders = async () => {
+    try {
+      const response = await fetch("/api/deriv/trades", { credentials: "same-origin", cache: "no-store" });
+      const data = await response.json() as { error?: string; account?: string; trades?: Array<Record<string, unknown>> };
+      if (!response.ok) throw new Error(data.error || "Could not reconcile broker history.");
+      setBrokerAccount(data.account || "");
+      setBrokerOrders(Array.isArray(data.trades) ? data.trades : []);
+      setBrokerMessage("Broker history refreshed. Contract statuses are reported from Deriv.");
+    } catch (error) {
+      setBrokerMessage(error instanceof Error ? error.message : "Could not load broker history.");
+    }
+  };
+  const placeBrokerOrder = async (contractType: "CALL" | "PUT") => {
+    if (brokerBusy || !Number.isFinite(brokerStake) || brokerStake <= 0) return;
+    setBrokerBusy(true);
+    setBrokerMessage("Submitting demo order to Deriv and waiting for broker confirmation…");
+    try {
+      const idempotencyKey = globalThis.crypto?.randomUUID?.() || `bt_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      const response = await fetch("/api/deriv/trade", {
+        method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
+        body: JSON.stringify({ symbol, contractType, duration, durationUnit: "m", stake: brokerStake }),
+      });
+      const data = await response.json() as { error?: string; reasons?: string[]; contractId?: number; status?: string; account?: string; stake?: number; currency?: string; liveTradingEnabled?: boolean };
+      if (!response.ok) throw new Error([data.error, ...(data.reasons || [])].filter(Boolean).join(" "));
+      setBrokerMessage(`Deriv confirmed demo contract #${data.contractId} · ${data.stake} ${data.currency} · status ${data.status}.`);
+      setBrokerAccount(data.account || "");
+      await refreshBrokerOrders();
+    } catch (error) {
+      setBrokerMessage(error instanceof Error ? error.message : "Demo order failed. Check Deriv connection and server configuration.");
+    } finally {
+      setBrokerBusy(false);
+    }
+  };
   const { candles, info } = useLiveFeed(symbol, granularity, 180);
   const last = candles[candles.length - 1];
   const live = info.status === "LIVE";
@@ -34,6 +74,24 @@ export default function ManualTrading() {
   };
   return <div className="lab">
     <div className="section-heading"><div><div className="eyebrow">05 / MANUAL EXECUTION PRACTICE</div><h3>Manual trading desk</h3></div><span className="safe-label"><ShieldCheck size={14} /> VIRTUAL ORDERS ONLY</span></div>
+    <section className="panel">
+      <div className="card-title"><b>Deriv broker orders</b><span className="card-status">VIRTUAL ACCOUNT ONLY</span></div>
+      <p className="hint">These controls submit a real contract to your authenticated Deriv virtual account. They are separate from the simulated LONG/SHORT practice controls below. Server-side checks enforce demo-account verification, stake risk, daily locks, open-contract limits and duplicate-request protection.</p>
+      <div className="fields four">
+        <label>Contract stake ($)<input type="number" min="0.01" step="0.01" value={brokerStake} disabled={brokerBusy} onChange={e => setBrokerStake(Number(e.target.value))} /></label>
+        <label>Duration<select value={duration} disabled={brokerBusy} onChange={e => setDuration(Number(e.target.value))}><option value={1}>1 minute</option><option value={2}>2 minutes</option><option value={3}>3 minutes</option><option value={5}>5 minutes</option><option value={10}>10 minutes</option></select></label>
+      </div>
+      <div className="manual-actions">
+        <button className="manual-buy" disabled={brokerBusy || !Number.isFinite(brokerStake) || brokerStake <= 0} onClick={() => placeBrokerOrder("CALL")}>{brokerBusy ? "Submitting…" : "Place Deriv demo CALL"}</button>
+        <button className="manual-sell" disabled={brokerBusy || !Number.isFinite(brokerStake) || brokerStake <= 0} onClick={() => placeBrokerOrder("PUT")}>{brokerBusy ? "Submitting…" : "Place Deriv demo PUT"}</button>
+      </div>
+      <p className="hint" role="status">{brokerMessage}{brokerAccount ? ` · Account ${brokerAccount}` : ""}</p>
+      <div className="btn-row"><button className="ghost-btn" disabled={brokerBusy} onClick={refreshBrokerOrders}>Refresh broker-confirmed history</button></div>
+      <div className="table-wrap"><table><thead><tr><th>Contract</th><th>Market</th><th>Stake</th><th>Status</th><th>Broker P&amp;L</th></tr></thead><tbody>
+        {brokerOrders.map((order, i) => { const result = order.result as Record<string, unknown> | undefined; const broker = order.broker as Record<string, unknown> | undefined; return <tr key={String(order.contractId ?? i)}><td>{order.contractId ? `#${order.contractId}` : "—"}</td><td>{String(order.symbol ?? "—")}</td><td>{order.stake != null ? `${order.stake} ${String(order.currency ?? "")}` : "—"}</td><td>{String(order.status ?? "unknown")}{order.brokerConfirmed ? " · confirmed" : " · verify"}</td><td>{result?.profit != null ? String(result.profit) : broker?.profit != null ? String(broker.profit) : "Pending"}</td></tr>; })}
+        {!brokerOrders.length && <tr><td colSpan={5}>No broker order records loaded. Connect Deriv, then refresh history.</td></tr>}
+      </tbody></table></div>
+    </section>
     <section className="panel manual-grid">
       <div>
         <p className="hint">Practice entries and exits against the live Deriv candle feed. These are simulated spot-style positions, not Deriv contracts; results exclude spread, contract payout rules, fees and slippage. No broker order is sent.</p>
