@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Download, Play, RotateCcw, ScrollText } from "lucide-react";
 import { GRANULARITIES } from "../../shared/candles.js";
 import { DEFAULT_SIM } from "../../shared/sim.js";
@@ -11,12 +11,12 @@ import type { usePaper } from "../hooks/usePaper";
 type Paper = ReturnType<typeof usePaper>;
 
 export default function PaperTrading({ paper }: { paper: Paper }) {
-  const { session, info, start, reset, manualTrade, candles } = paper;
+  const { session, info, start, reset, manualTrade, candles, adjustBalance } = paper;
   const [symbol, setSymbol] = useState<string>("R_100");
   const [granularity, setGranularity] = useState(60);
   const [strategyIds, setStrategyIds] = useState<string[]>(strategies.slice(0, 3).map(s => s.id));
   const [consensusPercent, setConsensusPercent] = useState(60);
-  const [balance, setBalance] = useState<number>(TRADING_POLICY.startingBalanceUsd);
+  const [balance, setBalance] = useState<number>(TRADING_POLICY.startingBalanceUsd);\n  const [balanceAdjustment, setBalanceAdjustment] = useState<number>(TRADING_POLICY.startingBalanceUsd);\n  useEffect(() => { if (session) setBalanceAdjustment(session.state.balance); }, [session?.state.balance]);
   const [sessionLossCap, setSessionLossCap] = useState<number>(TRADING_POLICY.sessionLossLimitUsd);
   const [tradeProfitTarget, setTradeProfitTarget] = useState<number>(10);
   const [sessionProfitTarget, setSessionProfitTarget] = useState<number>(TRADING_POLICY.dailyProfitTargetUsd);
@@ -79,6 +79,14 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
         <div className="metric"><small>BLOCKED BY GATE</small><b>{state.blockedSignals}</b></div>
         <div className="metric"><small>SESSION LOSS CAP</small><b>{money(meta.cfg.sessionLossLimitAmount ?? TRADING_POLICY.sessionLossLimitUsd)}</b></div>
       </div>
+      <section className="panel">
+        <div className="card-title"><b>Adjust virtual demo balance</b><span className="card-status">SIMULATED CASH ONLY</span></div>
+        <p className="hint">Change the paper account balance while the bot is running. Minimum $2, maximum $1,000,000,000. To keep reported trading P&amp;L honest, the starting-balance baseline moves by the same amount. Adjustment is available only when no paper position or entry is open.</p>
+        <div className="fields four">
+          <label>New virtual balance ($)<input type="number" min="2" max="1000000000" step="1" value={balanceAdjustment} onChange={e => setBalanceAdjustment(Number(e.target.value))} /></label>
+        </div>
+        <button className="primary-btn" disabled={!Number.isFinite(balanceAdjustment) || balanceAdjustment < 2 || balanceAdjustment > 1000000000 || Boolean(state.position || state.pending) || Math.abs(balanceAdjustment - state.balance) < 0.000001} onClick={() => adjustBalance(balanceAdjustment)}>Apply balance adjustment</button>
+      </section>
       <p className="hint">Enabled modules: {activeStrategies.join(" · ")}. {meta.consensusPercent ?? 60}% consensus required. {info.message}{info.lastDataAt ? ` Last data ${clockSeconds(info.lastDataAt)}.` : " "}The bot only runs while this page is open; session state is stored in this browser. All trades remain simulated.</p>
       <section className="panel manual-trading">
         <div className="card-title"><b>Manual trading</b><span className="card-status">PAPER ONLY</span></div>
