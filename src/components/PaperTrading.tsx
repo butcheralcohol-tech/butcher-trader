@@ -16,7 +16,9 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
   const [granularity, setGranularity] = useState(60);
   const [strategyIds, setStrategyIds] = useState<string[]>(strategies.slice(0, 3).map(s => s.id));
   const [consensusPercent, setConsensusPercent] = useState(60);
-  const [balance, setBalance] = useState<number>(TRADING_POLICY.startingBalanceUsd);\n  const [balanceAdjustment, setBalanceAdjustment] = useState<number>(TRADING_POLICY.startingBalanceUsd);\n  useEffect(() => { if (session) setBalanceAdjustment(session.state.balance); }, [session?.state.balance]);
+  const [balance, setBalance] = useState<number>(TRADING_POLICY.startingBalanceUsd);
+  const [balanceAdjustment, setBalanceAdjustment] = useState<number>(TRADING_POLICY.startingBalanceUsd);
+  useEffect(() => { if (session) setBalanceAdjustment(session.state.balance); }, [session?.state.balance]);
   const [sessionLossCap, setSessionLossCap] = useState<number>(TRADING_POLICY.sessionLossLimitUsd);
   const [tradeProfitTarget, setTradeProfitTarget] = useState<number>(10);
   const [sessionProfitTarget, setSessionProfitTarget] = useState<number>(TRADING_POLICY.dailyProfitTargetUsd);
