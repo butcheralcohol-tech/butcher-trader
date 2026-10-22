@@ -120,3 +120,29 @@ test("shorts mirror longs", () => {
   assert.equal(s.trades[0].exitReason, "target");
   assert.ok(s.trades[0].pnl > 0);
 });
+
+
+test("adjustable per-trade profit target closes a paper position at the configured net target", () => {
+  const s = createState(1000);
+  const k = { ...cfg, tradeProfitTargetAmount: 5 };
+  stepCandle(s, c(0, 100, 100, 100, 100), () => long, k);
+  stepCandle(s, c(1, 100, 100.4, 99.6, 100), () => null, k);
+  stepCandle(s, c(2, 100, 101, 100, 100.5), () => null, k);
+  assert.equal(s.trades.length, 1);
+  assert.equal(s.trades[0].exitReason, "trade-profit-target");
+  assert.ok(Math.abs(s.trades[0].pnl - 5) < 1e-8);
+});
+
+test("adjustable session profit target exits the open trade and blocks further entries", () => {
+  const s = createState(1000);
+  const k = { ...cfg, sessionProfitTargetAmount: 5 };
+  stepCandle(s, c(0, 100, 100, 100, 100), () => long, k);
+  stepCandle(s, c(1, 100, 100.4, 99.6, 100), () => null, k);
+  stepCandle(s, c(2, 100, 101, 100, 100.5), () => null, k);
+  assert.equal(s.trades.length, 1);
+  assert.equal(s.trades[0].exitReason, "session-profit-target");
+  assert.ok(Math.abs(s.balance - 1005) < 1e-8);
+  stepCandle(s, c(3, 100.5, 100.7, 100.2, 100.5), () => long, k);
+  assert.equal(s.pending, null);
+  assert.ok(s.blockedSignals >= 1);
+});

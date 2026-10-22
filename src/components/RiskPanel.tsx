@@ -6,7 +6,7 @@ import { fmt } from "../lib/format";
 type RiskResult = { allowed: boolean; reasons: string[]; maxRiskAmount: number };
 
 export default function RiskPanel() {
-  const [risk, setRisk] = useState({ balance: "1000", riskPercent: String(TRADING_POLICY.riskPercent), dailyLossLimitPercent: String(TRADING_POLICY.dailyLossLimitPercent), dailyPnl: "0" });
+  const [risk, setRisk] = useState({ balance: String(TRADING_POLICY.startingBalanceUsd), riskPercent: String(TRADING_POLICY.riskPercent), dailyLossLimitPercent: String(TRADING_POLICY.dailyLossLimitPercent), dailyPnl: "0" });
   const [result, setResult] = useState<RiskResult | null>(null);
   const [apiHealth, setApiHealth] = useState("CHECKING");
   useEffect(() => { fetch("/api/health").then(r => r.json()).then(() => setApiHealth("ONLINE")).catch(() => setApiHealth("OFFLINE")); }, []);
@@ -21,15 +21,16 @@ export default function RiskPanel() {
     <label>{label}<input type="number" value={risk[key]} onChange={e => setRisk({ ...risk, [key]: e.target.value })} {...extra} /></label>;
 
   return <section className="risk-grid">
-    <div className="risk-card"><div className="card-title"><ShieldCheck size={18} /><b>Pre-trade risk gate</b><span className="card-status">ACTIVE</span></div>
-      <p>Configured for synthetic indices and forex. Planned risk is capped at 1% per trade; reaching the 3% daily loss limit pauses new entries until the next trading day. Values are checked by the backend; this screen does not place orders.</p>
-      <div className="fields">{field("Demo balance (USD)", "balance", { min: 1 })}{field("Risk per trade (%)", "riskPercent", { min: 0.1, max: TRADING_POLICY.riskPercent, step: 0.1 })}{field("Daily loss lock (%)", "dailyLossLimitPercent", { min: 0.1, max: TRADING_POLICY.dailyLossLimitPercent, step: 0.1 })}{field("Demo daily P&L ($)", "dailyPnl", { max: 0 })}</div>
+    <div className="risk-card"><div className="card-title"><ShieldCheck size={18} /><b>Pre-trade risk gate</b><span className="card-status">DEMO POLICY</span></div>
+      <p>Demo settings: $1,000 starting balance, 1% maximum planned risk ($10 initially) per trade, $20 absolute daily loss lock, and $40 aspirational daily profit target. The target is not guaranteed. This screen checks a demo simulation; it does not place broker orders.</p>
+      <div className="fields">{field("Demo balance (USD)", "balance", { min: 1 })}{field("Risk per trade (%)", "riskPercent", { min: 0.1, max: TRADING_POLICY.riskPercent, step: 0.1 })}{field("Daily loss lock (%)", "dailyLossLimitPercent", { min: 0.1, max: TRADING_POLICY.dailyLossLimitPercent, step: 0.1 })}{field("Demo daily P&L ($)", "dailyPnl")}</div>
       <button className="primary-btn" onClick={check}><RefreshCw size={15} /> Run risk check</button>
       {result && <div className={`risk-result ${result.allowed ? "pass" : "blocked"}`}><b>{result.allowed ? "GATE PASSED — DEMO ONLY" : "TRADE BLOCKED"}</b><span>Max planned risk: ${fmt(result.maxRiskAmount)}</span>{result.reasons.map(r => <small key={r}>{r}</small>)}</div>}</div>
     <div className="stats-column">
-      <div className="stat-card"><div className="stat-icon"><Zap size={17} /></div><div><small>EXECUTION MODE</small><b>LIVE PREPARATION · LOCKED</b><span>Demo only; broker orders disabled</span></div><div className="stat-lock"><LockKeyhole size={16} /></div></div>
+      <div className="stat-card"><div className="stat-icon"><Zap size={17} /></div><div><small>EXECUTION MODE</small><b>DEMO ONLY · LIVE LOCKED</b><span>Broker orders disabled</span></div><div className="stat-lock"><LockKeyhole size={16} /></div></div>
       <div className="stat-card"><div className="stat-icon"><ShieldCheck size={17} /></div><div><small>MARKETS</small><b>SYNTHETIC + FOREX</b><span>One open position maximum</span></div><div className="stat-lock"><LockKeyhole size={16} /></div></div>
+      <div className="stat-card"><div className="stat-icon"><ShieldCheck size={17} /></div><div><small>STRATEGY METHOD</small><b>WEIGHTED · CONFIGURED</b><span>Paper engine still uses consensus votes</span></div><div className={`status-led ${apiHealth === "ONLINE" ? "" : "off"}`} /></div>
       <div className="stat-card"><div className="stat-icon"><ShieldCheck size={17} /></div><div><small>BACKEND STATUS</small><b>{apiHealth}</b><span>Serverless API · Vercel</span></div><div className={`status-led ${apiHealth === "ONLINE" ? "" : "off"}`} /></div>
-      <div className="warning-note"><b>Hard live-trading lock</b><p>Live orders remain disabled until secure account authorization, verified demo-order tests, and an explicit safety review are complete. The daily-loss setting in this milestone blocks new trade requests; it does not automatically liquidate open positions. Risk limits cannot guarantee loss prevention.</p></div></div>
+      <div className="warning-note"><b>Server-side risk boundary</b><p>The API fixes the configured dollar/percentage limits, but it does not yet read authoritative broker balance/P&L or gate a broker order because authenticated order execution is not implemented. Daily stops currently prevent new simulated entries; they cannot guarantee exit prices or prevent slippage.</p></div></div>
   </section>;
 }

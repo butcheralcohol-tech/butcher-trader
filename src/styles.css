@@ -54,3 +54,15 @@
 .setup-steps code{font:9px "DM Mono";color:#f3b0b4;background:#1a1113;padding:2px 4px}
 @media(max-width:950px){.manual-grid{grid-template-columns:1fr}.manual-chart .chart{height:160px}}
 @media(max-width:650px){.manual-fields{grid-template-columns:1fr}.manual-quote{gap:6px;padding:10px}.manual-quote b{font-size:9px}.manual-actions{grid-template-columns:1fr}.account-connect .ghost-btn{width:100%}}
+
+
+/* Unified dashboard trading workspace */
+.dashboard-workspace{margin:22px 0 26px;padding:19px}
+.dashboard-tool-switch{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 12px;border-bottom:1px solid #29292e;padding-bottom:12px}
+.dashboard-tool-switch button{background:#111114;border:1px solid #303036;color:#aaaab2;padding:10px 13px;font:10px "DM Mono";cursor:pointer;transition:background .15s,border-color .15s,color .15s}
+.dashboard-tool-switch button:hover{border-color:#793039;color:#f1f1f3}
+.dashboard-tool-switch button.active,.dashboard-tool-switch button[aria-selected="true"]{background:#281114;border-color:#8b3039;color:#fff;box-shadow:inset 0 -2px #e1323b}
+.dashboard-workspace>.lab{margin-top:14px}
+.dashboard-workspace>.section-heading{margin-top:18px}
+.dashboard-workspace>.hint{max-width:1000px;line-height:1.8}
+@media(max-width:650px){.dashboard-workspace{padding:12px}.dashboard-tool-switch{display:grid;grid-template-columns:1fr 1fr}.dashboard-tool-switch button{min-height:42px;padding:8px 6px;font-size:9px}.dashboard-workspace>.section-heading{align-items:start;gap:10px;flex-wrap:wrap}}

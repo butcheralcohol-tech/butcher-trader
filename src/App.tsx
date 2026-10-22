@@ -34,7 +34,7 @@ export default function App() {
       <div className="side-bottom"><div className="status-led" /><div><b>DEMO PROTOCOL</b><small>LIVE ORDERS DISABLED</small></div></div></aside>
     <main className="main"><header className="topbar"><div><div className="eyebrow">TRADING INTELLIGENCE / {view.toUpperCase()}</div><h1>{titles[view]}<span>.</span></h1></div><div className="top-actions"><span className="demo-badge"><span /> DEMO MODE</span><div className="avatar">BT</div></div></header>
       <nav className="mobile-nav" aria-label="Sections">{(Object.keys(titles) as View[]).map(id => <button key={id} className={view === id ? "on" : ""} onClick={() => setView(id)}>{titles[id]}</button>)}</nav>
-      {view === "overview" && <Overview />}
+      {view === "overview" && <Overview paper={paper} /> }
       {view === "lab" && <StrategyLab />}
       {view === "paper" && <PaperTrading paper={paper} />}
       {view === "manual" && <ManualTrading />}
@@ -45,7 +45,17 @@ export default function App() {
   </div>;
 }
 
-function Overview() {
+type DashboardTool = "manual" | "robot" | "strategies" | "risk" | "account";
+const dashboardTools: { id: DashboardTool; label: string; description: string }[] = [
+  { id: "manual", label: "Manual orders", description: "Practice LONG/SHORT entries and exits with virtual positions." },
+  { id: "robot", label: "Robot / paper bot", description: "Run multiple strategy modules, set demo balance and loss/profit limits, and inspect the audit log." },
+  { id: "strategies", label: "Strategy lab", description: "Inspect and test the available signal strategies." },
+  { id: "risk", label: "Risk controls", description: "Review capital-preservation rules before running a paper session." },
+  { id: "account", label: "Deriv account", description: "Review the account connection status. This does not unlock real-money execution." },
+];
+
+function Overview({ paper }: { paper: ReturnType<typeof usePaper> }) {
+  const [dashboardTool, setDashboardTool] = useState<DashboardTool>("manual");
   const [selected, setSelected] = useState<string>("R_100");
   const [granularity, setGranularity] = useState(60);
   const { candles, info } = useLiveFeed(selected, granularity, 300);
@@ -61,7 +71,21 @@ function Overview() {
 
   return <>
     <section className="hero"><div className="hero-grid" /><div className="hero-copy"><div className="eyebrow red">DISCIPLINE OVER IMPULSE</div><h2>Stay sharp.<br /><em>Protect capital.</em></h2><p>A demo-first trading workspace. Signals are observations, not guarantees. Every order must pass the risk gate.</p><div className="hero-tags"><span><LockKeyhole size={13} /> LIVE EXECUTION LOCKED</span><span><ShieldCheck size={13} /> RISK GATE ACTIVE</span></div></div><div className="hero-emblem"><div className="emblem-ring"><span>B</span></div><div className="emblem-caption">PRECISION / PATIENCE / PROCESS</div></div></section>
-    <section className="dashboard-stats" aria-label="Dashboard summary"><article className="dashboard-stat"><span className="dashboard-stat-icon"><Activity size={16} /></span><div><small>SELECTED MARKET</small><strong>{market.symbol}</strong><span>{market.name}</span></div></article><article className="dashboard-stat"><span className="dashboard-stat-icon"><Radio size={16} /></span><div><small>FEED STATUS</small><strong className={live ? "metric-good" : "metric-wait"}>{info.status}</strong><span>{info.lastDataAt ? `Updated ${clockSeconds(info.lastDataAt)}` : "Waiting for market data"}</span></div></article><article className="dashboard-stat"><span className="dashboard-stat-icon"><Crosshair size={16} /></span><div><small>CANDLES LOADED</small><strong>{candles.length}</strong><span>{GRANULARITIES.find(g => g.seconds === granularity)?.label ?? "Selected timeframe"}</span></div></article><article className="dashboard-stat"><span className="dashboard-stat-icon"><LockKeyhole size={16} /></span><div><small>EXECUTION MODE</small><strong>DEMO ONLY</strong><span>Live orders disabled</span></div></article></section>\n    <div className="section-heading"><div><div className="eyebrow">01 / MARKET INTELLIGENCE</div><h3>Market watch</h3></div><div className="feed-status"><span className={live ? "pulse" : "pulse muted"} />{info.status}{info.lastDataAt ? ` · updated ${clockSeconds(info.lastDataAt)}` : ""}</div></div>
+    <section className="dashboard-stats" aria-label="Dashboard summary"><article className="dashboard-stat"><span className="dashboard-stat-icon"><Activity size={16} /></span><div><small>SELECTED MARKET</small><strong>{market.symbol}</strong><span>{market.name}</span></div></article><article className="dashboard-stat"><span className="dashboard-stat-icon"><Radio size={16} /></span><div><small>FEED STATUS</small><strong className={live ? "metric-good" : "metric-wait"}>{info.status}</strong><span>{info.lastDataAt ? `Updated ${clockSeconds(info.lastDataAt)}` : "Waiting for market data"}</span></div></article><article className="dashboard-stat"><span className="dashboard-stat-icon"><Crosshair size={16} /></span><div><small>CANDLES LOADED</small><strong>{candles.length}</strong><span>{GRANULARITIES.find(g => g.seconds === granularity)?.label ?? "Selected timeframe"}</span></div></article><article className="dashboard-stat"><span className="dashboard-stat-icon"><LockKeyhole size={16} /></span><div><small>EXECUTION MODE</small><strong>DEMO ONLY</strong><span>Live orders disabled</span></div></article></section>
+    <section className="panel dashboard-workspace">
+      <div className="section-heading"><div><div className="eyebrow">QUICK EXECUTION / UNIFIED WORKSPACE</div><h3>Trading operations</h3></div><span className="safe-label"><ShieldCheck size={14} /> PAPER / DEMO PRACTICE</span></div>
+      <p className="hint">Choose the activity without leaving the main dashboard: manual practice orders, the multi-strategy robot, strategy testing, risk controls, or account connection. The manual desk and robot currently simulate trades only; neither submits Deriv orders.</p>
+      <div className="dashboard-tool-switch" role="tablist" aria-label="Dashboard trading activities">
+        {dashboardTools.map(tool => <button key={tool.id} type="button" role="tab" aria-selected={dashboardTool === tool.id} className={dashboardTool === tool.id ? "active" : ""} onClick={() => setDashboardTool(tool.id)}>{tool.label}</button>)}
+      </div>
+      <p className="hint">{dashboardTools.find(tool => tool.id === dashboardTool)?.description}</p>
+      {dashboardTool === "manual" && <ManualTrading />}
+      {dashboardTool === "robot" && <PaperTrading paper={paper} />}
+      {dashboardTool === "strategies" && <StrategyLab />}
+      {dashboardTool === "risk" && <><div className="section-heading"><div><div className="eyebrow">CAPITAL PRESERVATION</div><h3>Risk engine</h3></div><span className="safe-label"><ShieldCheck size={14} /> CONSERVATIVE PRESET</span></div><RiskPanel /></>}
+      {dashboardTool === "account" && <DerivConnection />}
+    </section>
+    <div className="section-heading"><div><div className="eyebrow">01 / MARKET INTELLIGENCE</div><h3>Market watch</h3></div><div className="feed-status"><span className={live ? "pulse" : "pulse muted"} />{info.status}{info.lastDataAt ? ` · updated ${clockSeconds(info.lastDataAt)}` : ""}</div></div>
     <section className="market-layout"><div className="market-list">{MARKETS.map(m => <button key={m.symbol} onClick={() => setSelected(m.symbol)} className={`market-row ${selected === m.symbol ? "chosen" : ""}`}><div className="market-icon">{m.group === "FOREX" ? "FX" : "V"}</div><div className="market-name"><b>{m.name}</b><small>{m.symbol} · {m.group}</small></div><div className="market-arrow">{selected === m.symbol ? <ArrowUpRight size={16} /> : <ArrowDownRight size={16} />}</div></button>)}</div>
       <div className="price-panel"><div className="price-top"><div><span className="tiny-label">SELECTED INSTRUMENT</span><h4>{market.name}</h4><small>{market.symbol}</small></div>
         <div className="tf-switch" role="group" aria-label="Timeframe">{GRANULARITIES.map(g => <button key={g.seconds} className={granularity === g.seconds ? "on" : ""} onClick={() => setGranularity(g.seconds)}>{g.label}</button>)}</div>
@@ -71,7 +95,5 @@ function Overview() {
         <CandleChart candles={candles} overlays={overlays} markers={markers} />
         {!live && <div className="feed-note">{info.message}{market.group === "FOREX" ? " Forex markets are closed on weekends; synthetic indices trade 24/7." : ""}</div>}
         <div className="chart-footer"><span>LAST CANDLE <b>{last ? new Date(last.time * 1000).toLocaleTimeString("en-GB", { hour12: false }) : "Waiting…"}</b></span><span>NO ORDERS PLACED</span></div></div></section>
-    <div className="section-heading lower"><div><div className="eyebrow">02 / CAPITAL PRESERVATION</div><h3>Risk engine</h3></div><span className="safe-label"><ShieldCheck size={14} /> CONSERVATIVE PRESET</span></div>
-    <RiskPanel />
   </>;
 }

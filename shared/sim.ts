@@ -2,14 +2,16 @@ import { evaluateRisk } from "./risk.js";
 import type { Candle, Side, Signal } from "./types.js";
 
 /** One candle-by-candle execution model shared by the backtester and the paper trader, so both behave identically.
- *  Signals are read at a candle CLOSE and filled at the NEXT candle's OPEN. If stop and target are both touched inside one candle, the stop is assumed first. */
+ * Signals are read at a candle CLOSE and filled at the NEXT candle's OPEN. If stop and target are both touched inside one candle, the stop is assumed first. */
 export type SimConfig = {
   riskPercent: number; dailyLossLimitPercent: number;
+  /** Absolute limits for the paper session and trading day. */
+  dailyLossLimitAmount?: number; sessionLossLimitAmount?: number; dailyProfitTargetAmount?: number; tradeProfitTargetAmount?: number; sessionProfitTargetAmount?: number;
   feeBps: number; slippageBps: number; maxHoldBars: number; maxLeverage: number; allowShort: boolean;
 };
 export const DEFAULT_SIM: SimConfig = { riskPercent: 0.5, dailyLossLimitPercent: 2, feeBps: 2, slippageBps: 1, maxHoldBars: 50, maxLeverage: 5, allowShort: true };
 
-export type ExitReason = "stop" | "target" | "timeout" | "end";
+export type ExitReason = "stop" | "target" | "trade-profit-target" | "session-profit-target" | "timeout" | "end";
 export type Position = { id: number; side: Side; entry: number; stop: number; target: number; units: number; risk: number; entryFee: number; openedAt: number; bars: number; reason: string };
 export type Trade = { id: number; side: Side; entryTime: number; exitTime: number; entry: number; exit: number; stop: number; target: number; units: number; pnl: number; fees: number; r: number; exitReason: ExitReason; bars: number; signal: string };
 export type AuditType = "INFO" | "SIGNAL" | "GATE_BLOCKED" | "FILLED" | "EXIT" | "SKIPPED";
@@ -29,8 +31,10 @@ export const createState = (balance: number, logEvents = true): SimState => ({
 
 const log = (s: SimState, time: number, type: AuditType, message: string) => { if (s.logEvents) s.events.push({ time, type, message }); };
 const gate = (s: SimState, cfg: SimConfig) => evaluateRisk({
-  balance: s.balance, riskPercent: cfg.riskPercent, dailyLossLimitPercent: cfg.dailyLossLimitPercent, dailyPnl: s.dayPnl,
-  openPositions: s.position ? 1 : 0, maxOpenPositions: 1, liveEnabled: false,
+  balance: s.balance, riskPercent: cfg.riskPercent, dailyLossLimitPercent: cfg.dailyLossLimitPercent,
+  dailyLossLimitAmount: cfg.dailyLossLimitAmount, sessionLossLimitAmount: cfg.sessionLossLimitAmount,
+  sessionPnl: s.balance - s.startBalance, dailyProfitTargetAmount: cfg.dailyProfitTargetAmount, sessionProfitTargetAmount: cfg.sessionProfitTargetAmount,
+  dailyPnl: s.dayPnl, openPositions: s.position ? 1 : 0, maxOpenPositions: 1, liveEnabled: false,
 });
 const px = (n: number) => n.toFixed(Math.abs(n) >= 100 ? 2 : 4);
 
@@ -61,6 +65,12 @@ function close(s: SimState, time: number, exit: number, reason: ExitReason, cfg:
   s.position = null;
 }
 
+function profitTargetPrice(p: Position, targetNetPnl: number, feeBps: number): number {
+  const rate = feeBps / 10000;
+  if (p.side === "LONG") return (p.entry * p.units + p.entryFee + targetNetPnl) / (p.units * (1 - rate));
+  return (p.entry * p.units - p.entryFee - targetNetPnl) / (p.units * (1 + rate));
+}
+
 function manage(s: SimState, c: Candle, justFilled: boolean, cfg: SimConfig) {
   const p = s.position!, slip = cfg.slippageBps / 10000;
   p.bars++;
@@ -71,10 +81,34 @@ function manage(s: SimState, c: Candle, justFilled: boolean, cfg: SimConfig) {
     if (c.high >= p.stop || (!justFilled && c.open >= p.stop)) return close(s, c.time, (!justFilled && c.open >= p.stop ? c.open : p.stop) * (1 + slip), "stop", cfg);
     if (c.low <= p.target) return close(s, c.time, p.target, "target", cfg);
   }
+  const direction = p.side === "LONG" ? 1 : -1;
+  const favorableExtreme = p.side === "LONG" ? c.high : c.low;
+  const candidates: Array<{ price: number; reason: ExitReason }> = [];
+  const tradeTarget = cfg.tradeProfitTargetAmount;
+  if (tradeTarget !== undefined && Number.isFinite(tradeTarget) && tradeTarget > 0) {
+    candidates.push({ price: profitTargetPrice(p, tradeTarget, cfg.feeBps), reason: "trade-profit-target" });
+  }
+  const sessionTarget = cfg.sessionProfitTargetAmount;
+  if (sessionTarget !== undefined && Number.isFinite(sessionTarget) && sessionTarget > 0) {
+    const realizedSessionPnl = s.balance - s.startBalance;
+    const remaining = sessionTarget - realizedSessionPnl;
+    if (remaining <= 0) {
+      close(s, c.time, c.close * (1 - direction * slip), "session-profit-target", cfg);
+      return;
+    }
+    candidates.push({ price: profitTargetPrice(p, remaining, cfg.feeBps), reason: "session-profit-target" });
+  }
+  const hit = candidates
+    .filter(target => p.side === "LONG" ? favorableExtreme >= target.price : favorableExtreme <= target.price)
+    .sort((a, b) => p.side === "LONG" ? a.price - b.price : b.price - a.price)[0];
+  if (hit) {
+    close(s, c.time, hit.price, hit.reason, cfg);
+    return;
+  }
   if (p.bars >= cfg.maxHoldBars) close(s, c.time, c.close * (p.side === "LONG" ? 1 - slip : 1 + slip), "timeout", cfg);
 }
 
-/** Advance the simulation by one CLOSED candle. Pass signalFn = null to manage exits only (no new entries). Mutates `s`. */
+/** Advance the simulation by one CLOSED candle. Pass signalFn = null to manage exits only (no new entries). Mutates s. */
 export function stepCandle(s: SimState, c: Candle, signalFn: (() => Signal | null) | null, cfg: SimConfig): void {
   const day = new Date(c.time * 1000).toISOString().slice(0, 10);
   if (day !== s.dayKey) { s.dayKey = day; s.dayPnl = 0; }
