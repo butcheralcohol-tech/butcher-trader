@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Candle, Side } from "../../shared/types.js";
-import { advancePaper, newSession, parseSession, queueManualPaperSignal, type PaperMeta, type PaperSession } from "../../shared/paper.js";
+import { adjustPaperBalance, advancePaper, newSession, parseSession, queueManualPaperSignal, type PaperMeta, type PaperSession } from "../../shared/paper.js";
 import { DerivFeed, type FeedInfo } from "../lib/feed";
 import { idleInfo } from "./useLiveFeed";
 
@@ -45,6 +45,11 @@ export function usePaper() {
       return next ?? prev;
     });
   }, [candles]);
+  const adjustBalance = useCallback((newBalance: number) => setSession(prev => {
+    if (!prev) return prev;
+    const next = adjustPaperBalance(prev, newBalance);
+    return next ?? prev;
+  }), []);
   const reset = useCallback(() => setSession(null), []);
-  return { session, info, candles, start, reset, manualTrade };
+  return { session, info, candles, start, reset, manualTrade, adjustBalance };
 }
