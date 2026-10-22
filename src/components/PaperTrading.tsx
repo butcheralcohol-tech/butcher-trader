@@ -43,7 +43,7 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
     <section className="panel">
       <p className="hint">Run several strategies together against the live Deriv candle feed. Each strategy votes LONG or SHORT when it has a signal; the bot only queues a paper order when one direction reaches your consensus threshold. All orders are virtual, filled at the next candle open, and pass the shared risk gate. Nothing is sent to a Deriv account.</p>
       <div className="fields four">
-        <label>Starting demo stake / balance ($)<input type="number" min={TRADING_POLICY.minimumStartingBalanceUsd} step="10" value={balance} onChange={e => setBalance(Number(e.target.value))} /></label>
+        <label>Starting demo stake / balance ($)<input type="number" min={TRADING_POLICY.minimumStartingBalanceUsd} step="1" value={balance} onChange={e => setBalance(Number(e.target.value))} /></label>
         <label>Session loss cap ($)<input type="number" min="1" step="1" value={sessionLossCap} onChange={e => setSessionLossCap(Number(e.target.value))} /></label>
         <label>Profit target per trade ($)<input type="number" min="0.01" step="1" value={tradeProfitTarget} onChange={e => setTradeProfitTarget(Number(e.target.value))} /></label>
         <label>Profit target per session ($)<input type="number" min="0.01" step="1" value={sessionProfitTarget} onChange={e => setSessionProfitTarget(Number(e.target.value))} /></label>
