@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Download, Play, RotateCcw, ScrollText } from "lucide-react";
 import { GRANULARITIES } from "../../shared/candles.js";
 import { DEFAULT_SIM } from "../../shared/sim.js";
@@ -24,6 +24,43 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
   const [sessionProfitTarget, setSessionProfitTarget] = useState<number>(TRADING_POLICY.dailyProfitTargetUsd);
   const [manualStopPercent, setManualStopPercent] = useState(0.5);
   const [manualRewardRisk, setManualRewardRisk] = useState(2);
+  const [brokerExecution, setBrokerExecution] = useState(false);
+  const [brokerStake, setBrokerStake] = useState(2);
+  const [brokerExecutionMessage, setBrokerExecutionMessage] = useState("Off — robot trades are paper-only until demo execution is explicitly enabled.");
+  const processedEventCount = useRef(0);
+
+  useEffect(() => {
+    const events = session?.state.events ?? [];
+    const newEvents = events.slice(processedEventCount.current);
+    processedEventCount.current = events.length;
+    if (!brokerExecution || !session || !newEvents.length) return;
+    const fills = newEvents.map((event, index) => ({ event, index })).filter(({ event }) => event.type === "FILLED");
+    if (!fills.length) return;
+    let cancelled = false;
+    const execute = async () => {
+      for (const { event, index } of fills) {
+        if (cancelled) return;
+        const contractType = /PAPER LONG/.test(event.message) ? "CALL" : /PAPER SHORT/.test(event.message) ? "PUT" : null;
+        if (!contractType) continue;
+        setBrokerExecutionMessage(`Sending robot ${contractType} signal to Deriv demo account…`);
+        try {
+          const key = `robot_${session.meta.startedAt}_${event.time}_${processedEventCount.current - newEvents.length + index}`;
+          const response = await fetch("/api/deriv/trade", {
+            method: "POST", credentials: "same-origin",
+            headers: { "Content-Type": "application/json", "Idempotency-Key": key },
+            body: JSON.stringify({ symbol: session.meta.symbol, contractType, duration: 1, durationUnit: "m", stake: brokerStake }),
+          });
+          const data = await response.json() as { error?: string; reasons?: string[]; contractId?: number; status?: string; account?: string; stake?: number; currency?: string };
+          if (!response.ok) throw new Error([data.error, ...(data.reasons || [])].filter(Boolean).join(" "));
+          setBrokerExecutionMessage(`Deriv confirmed robot contract #${data.contractId} · ${data.stake} ${data.currency} · ${data.status}.`);
+        } catch (error) {
+          setBrokerExecutionMessage(error instanceof Error ? `Robot order blocked/failed: ${error.message}` : "Robot order failed; check broker history before retrying.");
+        }
+      }
+    };
+    void execute();
+    return () => { cancelled = true; };
+  }, [session?.state.events, session?.meta.startedAt, session?.meta.symbol, brokerExecution, brokerStake]);
 
   const begin = () => {
     if (!strategyIds.length || !Number.isFinite(balance) || balance < TRADING_POLICY.minimumStartingBalanceUsd || !Number.isFinite(sessionLossCap) || sessionLossCap <= 0 || !Number.isFinite(tradeProfitTarget) || tradeProfitTarget <= 0 || !Number.isFinite(sessionProfitTarget) || sessionProfitTarget <= 0) return;
@@ -90,6 +127,15 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
         <button className="primary-btn" disabled={!Number.isFinite(balanceAdjustment) || balanceAdjustment < 2 || balanceAdjustment > 1000000000 || Boolean(state.position || state.pending) || Math.abs(balanceAdjustment - state.balance) < 0.000001} onClick={() => adjustBalance(balanceAdjustment)}>Apply balance adjustment</button>
       </section>
       <p className="hint">Enabled modules: {activeStrategies.join(" · ")}. {meta.consensusPercent ?? 60}% consensus required. {info.message}{info.lastDataAt ? ` Last data ${clockSeconds(info.lastDataAt)}.` : " "}The bot only runs while this page is open; session state is stored in this browser. All trades remain simulated.</p>
+      <section className="panel manual-trading">
+        <div className="card-title"><b>Deriv demo robot execution</b><span className="card-status">DEMO ONLY · LIVE DISABLED</span></div>
+        <p className="hint">When enabled, each newly risk-approved paper-bot entry signal is mirrored as a Deriv virtual CALL/PUT contract. Broker-side risk checks still decide whether the order is allowed. This does not mirror paper exits; check broker-confirmed history for settlement. Never enable this unless you are connected to a Deriv virtual account.</p>
+        <div className="fields four">
+          <label>Broker demo stake ($)<input type="number" min="0.01" step="0.01" value={brokerStake} disabled={brokerExecution} onChange={e => setBrokerStake(Number(e.target.value))} /></label>
+          <label className="bot-mode"><input type="checkbox" checked={brokerExecution} onChange={e => { setBrokerExecution(e.target.checked); setBrokerExecutionMessage(e.target.checked ? "Armed for new paper-bot fills. Existing signals will not be replayed." : "Off — no new robot orders will be sent."); }} /> Enable broker demo orders</label>
+        </div>
+        <p className="hint" role="status">{brokerExecutionMessage}</p>
+      </section>
       <section className="panel manual-trading">
         <div className="card-title"><b>Manual trading</b><span className="card-status">PAPER ONLY</span></div>
         <p className="hint">Place a direction manually using the latest market quote. The order is queued for the next candle open, then checked by the same position and daily-loss risk gates. No Deriv account order is sent.</p>
