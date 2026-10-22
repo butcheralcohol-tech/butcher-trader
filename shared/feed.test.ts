@@ -104,3 +104,15 @@ test("late messages from a replaced socket are ignored", () => {
   assert.equal(seen.length, before);
   feed.stop();
 });
+
+test("successful candle history clears the response timeout", async () => {
+  const { feed, infos } = make({ responseTimeoutMs: 15 });
+  feed.start();
+  const socket = FakeSocket.all[0];
+  socket.open();
+  socket.emit(hist(2));
+  await wait(35);
+  assert.equal(infos.at(-1)!.status, "LIVE");
+  assert.doesNotMatch(infos.at(-1)!.message, /no candle data arrived|did not arrive/i);
+  feed.stop();
+});
