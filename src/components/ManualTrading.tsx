@@ -53,7 +53,8 @@ export default function ManualTrading() {
         if (!active) return;
         setDiscoveredContracts(Array.isArray(data.contracts) ? data.contracts : []);
         if (Array.isArray(data.contracts) && data.contracts.length && !data.contracts.some(item => item.contractType === contractType)) {
-          setContractType(data.contracts.some(item => item.contractType === "CALL") ? "CALL" : data.contracts[0].contractType);
+          const supported = data.contracts.filter(item => BROKER_CONTRACTS.some(c => c.value === item.contractType));
+          setContractType(supported.some(item => item.contractType === "CALL") ? "CALL" : (supported[0]?.contractType ?? "CALL"));
         }
         setDiscoveryMessage(`Deriv returned ${Array.isArray(data.contracts) ? data.contracts.length : 0} available contract types for ${symbol}. The order menu remains limited to types implemented by the order endpoint.`);
       })
@@ -64,6 +65,7 @@ export default function ManualTrading() {
       });
     return () => { active = false; };
   }, [symbol]);
+  const supportedDiscoveredContracts = discoveredContracts.filter(item => BROKER_CONTRACTS.some(c => c.value === item.contractType));
   const selectedContract = BROKER_CONTRACTS.find(c => c.value === contractType) ?? BROKER_CONTRACTS[0];
   const refreshBrokerOrders = async () => {
     try {
@@ -131,7 +133,7 @@ export default function ManualTrading() {
       {discoveredContracts.length > 0 && <details className="contract-discovery"><summary>View broker-discovered contract types ({discoveredContracts.length})</summary><div className="table-wrap"><table><thead><tr><th>Type</th><th>Category</th><th>Duration range</th></tr></thead><tbody>{discoveredContracts.map(contract => <tr key={contract.contractType}><td>{contract.label} <small>({contract.contractType})</small></td><td>{contract.category || "—"}</td><td>{String(contract.minDuration ?? "—")} – {String(contract.maxDuration ?? "—")}</td></tr>)}</tbody></table></div></details>}
       <div className="fields four">
         <label>Market<select value={symbol} disabled={brokerBusy} onChange={e => setSymbol(e.target.value)}>{MARKETS.map(m => <option key={m.symbol} value={m.symbol}>{m.name} ({m.symbol})</option>)}</select></label>
-        <label>Contract<select value={contractType} disabled={brokerBusy} onChange={e => { setContractType(e.target.value); const found = discoveredContracts.find(item => item.contractType === e.target.value); const unit = typeof found?.minDuration === "string" ? String(found.minDuration).match(/[tsmhd]$/)?.[0] : null; if (unit) setDurationUnit(unit); }}>{(discoveredContracts.length ? discoveredContracts : BROKER_CONTRACTS.map(c => ({ contractType: c.value, label: c.label, category: "", minDuration: null, maxDuration: null }))).map(c => <option key={c.contractType} value={c.contractType}>{c.label} ({c.contractType})</option>)}</select></label>
+        <label>Contract<select value={contractType} disabled={brokerBusy} onChange={e => { setContractType(e.target.value); const found = discoveredContracts.find(item => item.contractType === e.target.value); const unit = typeof found?.minDuration === "string" ? String(found.minDuration).match(/[tsmhd]$/)?.[0] : null; if (unit) setDurationUnit(unit); }}>{(supportedDiscoveredContracts.length ? supportedDiscoveredContracts : BROKER_CONTRACTS.map(c => ({ contractType: c.value, label: c.label, category: "", minDuration: null, maxDuration: null }))).map(c => <option key={c.contractType} value={c.contractType}>{c.label} ({c.contractType})</option>)}</select></label>
         <label>Contract stake ($)<input type="number" min="0.01" step="0.01" value={brokerStake} disabled={brokerBusy} onChange={e => setBrokerStake(Number(e.target.value))} /></label>
         <label>Duration unit<select value={selectedContract.unit === "t" ? "t" : durationUnit} disabled={brokerBusy || selectedContract.unit === "t"} onChange={e => setDurationUnit(e.target.value)}>{["t","s","m","h","d"].map(unit => <option key={unit} value={unit}>{({t:"Ticks",s:"Seconds",m:"Minutes",h:"Hours",d:"Days"} as Record<string,string>)[unit]}</option>)}</select></label><label>Duration value<input type="number" min="1" max="365" step="1" value={duration} disabled={brokerBusy} onChange={e => setDuration(Number(e.target.value))} /></label>
         {selectedContract.barrier && <><label>{contractType.startsWith("DIGIT") ? "Digit prediction (0–9)" : "Barrier / level"}<input type="number" min={contractType.startsWith("DIGIT") ? 0 : undefined} max={contractType.startsWith("DIGIT") ? 9 : undefined} step="any" value={barrier} disabled={brokerBusy} onChange={e => setBarrier(e.target.value)} /></label>{contractType === "RANGE" && <label>Second barrier / upper level<input type="number" step="any" value={barrier2} disabled={brokerBusy} onChange={e => setBarrier2(e.target.value)} /></label>}</>}
