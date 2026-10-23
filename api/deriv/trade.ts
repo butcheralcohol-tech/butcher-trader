@@ -5,7 +5,8 @@ import { OAUTH_COOKIE, decryptSession, parseCookies } from "../../shared/oauth-s
 import { evaluateDemoExecutionRisk, type DemoAccount } from "../../shared/demo-execution.js";
 
 type DerivReply = { req_id?: number; error?: { code?: string; message?: string }; authorize?: Record<string, unknown>; balance?: Record<string, unknown>;
-  proposal?: { id?: string; ask_price?: number; payout?: number; longcode?: string };\n  contracts_for?: { available?: Array<Record<string, unknown>> };
+  proposal?: { id?: string; ask_price?: number; payout?: number; longcode?: string };
+  contracts_for?: { available?: Array<Record<string, unknown>> };
   buy?: { contract_id?: number; buy_price?: number; transaction_id?: number } };
 const json = (res: ServerResponse, status: number, body: unknown) => {
   res.statusCode = status; res.setHeader("Content-Type", "application/json; charset=utf-8");
