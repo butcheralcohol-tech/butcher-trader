@@ -10,7 +10,7 @@
     "build": "tsc --noEmit && vite build",
     "start": "tsx server/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test shared/*.test.ts",
+    "test": "tsx --test shared/*.test.ts server/*.test.ts",
     "check": "npm test && npm run typecheck"
   },
   "dependencies": {
