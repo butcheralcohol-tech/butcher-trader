@@ -80,8 +80,17 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       sendJson(res, 403, { error: "Only a broker-verified Deriv virtual account can use this endpoint." }); return;
     }
     const prefix = "butcher:demo:" + accountId + ":contract:";
-    const scan = await redisCommand<[string, string[]]>(["SCAN", "0", "MATCH", prefix + "*", "COUNT", "100"]);
-    const keys = Array.isArray(scan?.[1]) ? scan[1] : [];
+    // SCAN returns pages; follow the cursor (bounded) so older orders are not silently dropped from reconciliation.
+    const keys: string[] = [];
+    let cursor = "0";
+    for (let page = 0; page < 50; page++) {
+      const scan = await redisCommand<[string, string[]]>(["SCAN", cursor, "MATCH", prefix + "*", "COUNT", "200"]);
+      if (!scan || !Array.isArray(scan[1])) throw new Error("Order records could not be listed; reconciliation cannot be confirmed.");
+      keys.push(...scan[1]);
+      cursor = String(scan[0]);
+      if (cursor === "0") break;
+    }
+    if (cursor !== "0") throw new Error("Too many order records to reconcile in one request.");
     const stored: StoredOrder[] = [];
     for (const key of keys) {
       const value = await redisCommand<string>(["GET", key]);
