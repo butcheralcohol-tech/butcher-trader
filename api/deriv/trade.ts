@@ -101,6 +101,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
   const barrier = body.barrier;
   const takeProfit = numberField(body.takeProfit);
   const stopLoss = numberField(body.stopLoss);
+  const supportedContractTypes = new Set(["CALL", "PUT", "DIGITUNDER", "DIGITOVER", "DIGITMATCH", "DIGITDIFF", "DIGITEVEN", "DIGITODD", "MULTUP", "MULTDOWN"]);
   const multiplierContract = contractType === "MULTUP" || contractType === "MULTDOWN";
   const digitBarrierContract = ["DIGITUNDER", "DIGITOVER", "DIGITMATCH", "DIGITDIFF"].includes(contractType);
   const barrierContract = digitBarrierContract || ["ONETOUCH", "NOTOUCH", "RANGE", "UPORDOWN", "EXPIRYRANGE", "EXPIRYMISS"].includes(contractType);
@@ -111,13 +112,14 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
   const barrier2 = body.barrier2;
   const barrier2Text = typeof barrier2 === "string" || typeof barrier2 === "number" ? String(barrier2) : "";
   const validBarrier = !barrierContract || (barrierText.length > 0 && barrierText.length <= 24 &&
-    /^-?\\d+(?:\\.\\d+)?$/.test(barrierText));
+    /^-?\d+(?:\.\d+)?$/.test(barrierText));
   const validSecondBarrier = contractType !== "RANGE" || (barrier2Text.length > 0 && barrier2Text.length <= 24 &&
-    /^-?\\d+(?:\\.\\d+)?$/.test(barrier2Text) && Number(barrier2Text) !== Number(barrierText));
-  if (!/^[A-Z0-9_]{2,32}$/.test(symbol) || !/^[A-Z0-9_]{2,32}$/.test(contractType) ||
+    /^-?\d+(?:\.\d+)?$/.test(barrier2Text) && Number(barrier2Text) !== Number(barrierText));
+  if (!/^[A-Z0-9_]{2,32}$/.test(symbol) || !supportedContractTypes.has(contractType) ||
       !validDuration || !validBarrier || !validSecondBarrier || stake === null || stake <= 0 ||
       (takeProfit !== null && takeProfit <= 0) || (stopLoss !== null && stopLoss <= 0) ||
-      ((takeProfit !== null || stopLoss !== null) && !multiplierContract)) {
+      ((takeProfit !== null || stopLoss !== null) && !multiplierContract) ||
+      (digitBarrierContract && (!/^\\d$/.test(barrierText) || Number(barrierText) > 9))) {
     json(res, 400, { error: "Invalid contract parameters. Contract availability and exact duration rules are verified against Deriv before a proposal is sent. TP/SL is currently supported only for multiplier contracts." }); return;
   }
   let account: DemoAccount | null = null;
@@ -208,7 +210,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       const durationSeconds: Record<string, number> = { t: 0, s: 1, m: 60, h: 3600, d: 86400 };
       const unitSeconds = durationSeconds[String(durationUnit)] ?? -1;
       const toSeconds = (value: string): number | null => {
-        const match = value.match(/^(\\d+)(t|s|m|h|d)$/);
+        const match = value.match(/^(\d+)(t|s|m|h|d)$/);
         return match ? Number(match[1]) * (durationSeconds[match[2]] || 1) : null;
       };
       const minSeconds = toSeconds(minDuration), maxSeconds = toSeconds(maxDuration);
