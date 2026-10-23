@@ -19,6 +19,12 @@ type OptionsMessage = {
   [key: string]: unknown;
 };
 
+export function isDemoOptionsAccountId(accountId: string): boolean {
+  // The current Options API uses DOT-prefixed account IDs. Never accept CR real accounts
+  // or wallet IDs; account type is still independently enforced by the demo-only OTP URL.
+  return /^DOT[0-9]+$/.test(accountId);
+}
+
 function safeApiError(payload: ApiEnvelope<unknown>, status: number): Error {
   const code = payload.errors?.[0]?.code;
   return new Error(`Deriv Options REST request failed (HTTP ${status}${code ? `, ${code}` : ""}).`);
@@ -42,7 +48,7 @@ export class DerivOptionsClient {
     if (!accessToken || accessToken.length > 4096) throw new Error("A valid server-side Deriv access token is required.");
     // This worker foundation deliberately permits demo accounts only. Real account execution
     // must not be reachable through an accidental environment-variable change.
-    if (!/^VRTC\d+$/.test(accountId)) throw new Error("Only Deriv virtual trading accounts are enabled in this worker.");
+    if (!isDemoOptionsAccountId(accountId)) throw new Error("Only Deriv virtual trading accounts are enabled in this worker.");
     const fetchImpl = input.fetchImpl ?? fetch;
     const headers: Record<string, string> = { Authorization: `Bearer ${accessToken}`, Accept: "application/json" };
     // OAuth access tokens do not need Deriv-App-ID; PATs do.
