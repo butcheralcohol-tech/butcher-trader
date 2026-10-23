@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowDownRight, ArrowUpRight, CircleStop, Radio, ShieldCheck } from "lucide-react";
 import { GRANULARITIES } from "../../shared/candles.js";
 import CandleChart from "./CandleChart";
@@ -38,6 +38,26 @@ export default function ManualTrading() {
   const [brokerMessage, setBrokerMessage] = useState("Connect a Deriv virtual account before placing demo orders.");
   const [brokerOrders, setBrokerOrders] = useState<Array<Record<string, unknown>>>([]);
   const [brokerAccount, setBrokerAccount] = useState("");
+  const [discoveredContracts, setDiscoveredContracts] = useState<Array<{ contractType: string; label: string; category: string; minDuration: unknown; maxDuration: unknown }>>([]);
+  const [discoveryMessage, setDiscoveryMessage] = useState("Connect Deriv to load market-specific contract availability.");
+  useEffect(() => {
+    let active = true;
+    setDiscoveryMessage("Checking Deriv contract availability…");
+    fetch(`/api/deriv/contracts?symbol=${encodeURIComponent(symbol)}`, { credentials: "same-origin", cache: "no-store" })
+      .then(async response => {
+        const data = await response.json() as { error?: string; contracts?: Array<{ contractType: string; label: string; category: string; minDuration: unknown; maxDuration: unknown }> };
+        if (!response.ok) throw new Error(data.error || "Contract discovery is unavailable.");
+        if (!active) return;
+        setDiscoveredContracts(Array.isArray(data.contracts) ? data.contracts : []);
+        setDiscoveryMessage(`Deriv returned ${Array.isArray(data.contracts) ? data.contracts.length : 0} available contract types for ${symbol}. The order menu remains limited to types implemented by the order endpoint.`);
+      })
+      .catch(error => {
+        if (!active) return;
+        setDiscoveredContracts([]);
+        setDiscoveryMessage(error instanceof Error ? error.message : "Contract discovery failed.");
+      });
+    return () => { active = false; };
+  }, [symbol]);
   const selectedContract = BROKER_CONTRACTS.find(c => c.value === contractType) ?? BROKER_CONTRACTS[0];
   const refreshBrokerOrders = async () => {
     try {
@@ -101,6 +121,8 @@ export default function ManualTrading() {
     <section className="panel">
       <div className="card-title"><b>Deriv broker orders</b><span className="card-status">VIRTUAL ACCOUNT ONLY</span></div>
       <p className="hint">These controls submit contracts only to an authenticated Deriv virtual account. The server validates the account, stake risk, daily locks, open-contract limits and duplicate-request protection. Availability depends on the selected market and Deriv contract rules.</p>
+      <p className="hint" role="status">{discoveryMessage}</p>
+      {discoveredContracts.length > 0 && <details className="contract-discovery"><summary>View broker-discovered contract types ({discoveredContracts.length})</summary><div className="table-wrap"><table><thead><tr><th>Type</th><th>Category</th><th>Duration range</th></tr></thead><tbody>{discoveredContracts.map(contract => <tr key={contract.contractType}><td>{contract.label} <small>({contract.contractType})</small></td><td>{contract.category || "—"}</td><td>{String(contract.minDuration ?? "—")} – {String(contract.maxDuration ?? "—")}</td></tr>)}</tbody></table></div></details>}
       <div className="fields four">
         <label>Market<select value={symbol} disabled={brokerBusy} onChange={e => setSymbol(e.target.value)}>{MARKETS.map(m => <option key={m.symbol} value={m.symbol}>{m.name} ({m.symbol})</option>)}</select></label>
         <label>Contract<select value={contractType} disabled={brokerBusy} onChange={e => setContractType(e.target.value)}>{BROKER_CONTRACTS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></label>
