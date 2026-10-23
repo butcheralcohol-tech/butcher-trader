@@ -22,7 +22,7 @@ type OptionsMessage = {
 export function isDemoOptionsAccountId(accountId: string): boolean {
   // The current Options API uses DOT-prefixed account IDs. Never accept CR real accounts
   // or wallet IDs; account type is still independently enforced by the demo-only OTP URL.
-  return /^DOT\\d+$/.test(accountId);
+  return /^DOT[0-9]+$/.test(accountId);
 }
 
 function safeApiError(payload: ApiEnvelope<unknown>, status: number): Error {
