@@ -16,6 +16,9 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
   const [granularity, setGranularity] = useState(60);
   const [strategyIds, setStrategyIds] = useState<string[]>(strategies.slice(0, 3).map(s => s.id));
   const [consensusPercent, setConsensusPercent] = useState(60);
+  const [strategyWeights, setStrategyWeights] = useState<Record<string, number>>(() =>
+    Object.fromEntries(strategies.map(strategy => [strategy.id, 1]))
+  );
   const [balance, setBalance] = useState<number>(TRADING_POLICY.startingBalanceUsd);
   const [balanceAdjustment, setBalanceAdjustment] = useState<number>(TRADING_POLICY.startingBalanceUsd);
   useEffect(() => { if (session) setBalanceAdjustment(session.state.balance); }, [session?.state.balance]);
@@ -70,7 +73,7 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
       symbol, granularity, strategyId: first.id, params: defaultParams(first),
       strategyIds: selected.map(s => s.id),
       strategyParams: Object.fromEntries(selected.map(s => [s.id, defaultParams(s)])),
-      consensusPercent, cfg: { ...DEFAULT_SIM, riskPercent: TRADING_POLICY.riskPercent, dailyLossLimitPercent: TRADING_POLICY.dailyLossLimitPercent, dailyLossLimitAmount: TRADING_POLICY.dailyLossLimitsUsd.SYNTHETIC, sessionLossLimitAmount: sessionLossCap, dailyProfitTargetAmount: TRADING_POLICY.dailyProfitTargetUsd, tradeProfitTargetAmount: tradeProfitTarget, sessionProfitTargetAmount: sessionProfitTarget }, startedAt: Date.now(),
+      consensusPercent, strategyWeights, cfg: { ...DEFAULT_SIM, riskPercent: TRADING_POLICY.riskPercent, dailyLossLimitPercent: TRADING_POLICY.dailyLossLimitPercent, dailyLossLimitAmount: TRADING_POLICY.dailyLossLimitsUsd.SYNTHETIC, sessionLossLimitAmount: sessionLossCap, dailyProfitTargetAmount: TRADING_POLICY.dailyProfitTargetUsd, tradeProfitTargetAmount: tradeProfitTarget, sessionProfitTargetAmount: sessionProfitTarget }, startedAt: Date.now(),
     }, balance);
   };
   const toggleStrategy = (id: string, checked: boolean) => setStrategyIds(current =>
@@ -93,9 +96,13 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
       <div className="card-title spaced"><b>Enable strategy modules</b><span className="card-status">{strategyIds.length} OF {strategies.length} SELECTED</span></div>
       <div className="bot-cards">{strategies.map((strategy, i) => <article className={strategyIds.includes(strategy.id) ? "bot-card selected" : "bot-card"} key={strategy.id}>
         <div className="bot-card-top"><span className="bot-number">MODULE 0{i + 1}</span><label className="bot-mode"><input type="checkbox" checked={strategyIds.includes(strategy.id)} onChange={e => toggleStrategy(strategy.id, e.target.checked)} /> ENABLE</label></div>
-        <h4>{strategy.name}</h4><p>{strategy.description}</p><div className="bot-card-foot"><span>{strategy.params.length} parameters · ATR risk levels</span><span>{strategyIds.includes(strategy.id) ? "ACTIVE VOTE" : "STANDBY"}</span></div>
+        <h4>{strategy.name}</h4><p>{strategy.description}</p>
+        <label className="strategy-weight">Vote weight ({strategyWeights[strategy.id].toFixed(1)}×)
+          <input aria-label={`${strategy.name} vote weight`} type="range" min="0.1" max="3" step="0.1" value={strategyWeights[strategy.id]} onChange={e => setStrategyWeights(current => ({ ...current, [strategy.id]: Number(e.target.value) }))} />
+        </label>
+        <div className="bot-card-foot"><span>{strategy.params.length} parameters · ATR risk levels</span><span>{strategyIds.includes(strategy.id) ? "ACTIVE VOTE" : "STANDBY"}</span></div>
       </article>)}</div>
-      <p className="hint">The configured policy requests weighted strategy scoring, but the current paper engine still uses consensus voting; weighted scoring is not yet implemented. A strategy that emits no signal contributes no directional vote. Conflicting or insufficient votes produce no trade.</p>
+      <p className="hint">Signals are combined by weighted score. Adjust each strategy’s relative vote weight (0.1×–3×); higher weights have more influence, but cannot bypass the consensus threshold or risk gate. A strategy that emits no signal contributes no directional vote. Conflicting or insufficient weighted scores produce no trade.</p>
       <button className="primary-btn" disabled={!strategyIds.length || !Number.isFinite(balance) || balance < TRADING_POLICY.minimumStartingBalanceUsd || !Number.isFinite(sessionLossCap) || sessionLossCap <= 0 || !Number.isFinite(tradeProfitTarget) || tradeProfitTarget <= 0 || !Number.isFinite(sessionProfitTarget) || sessionProfitTarget <= 0} onClick={begin}><Play size={14} /> Start multi-strategy paper bot</button>
     </section></div>;
 
