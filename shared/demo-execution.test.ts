@@ -33,7 +33,7 @@ test("fails closed on non-finite broker values", () => {
 });
 
 test("supports lower configurable daily, market and session loss caps", () => {
-  const decision = evaluateDemoExecutionRisk({ ...base, dailyLossLimitUsd: 15, marketLossLimitUsd: 8, sessionLossLimitUsd: 5, dailyNetPnl: -5 });
+  const decision = evaluateDemoExecutionRisk({ ...base, dailyLossLimitUsd: 15, marketLossLimitUsd: 8, sessionLossLimitUsd: 5, dailyNetPnl: -8 });
   assert.ok(decision.reasons.some((reason) => reason.includes("per-session loss cap")));
   assert.ok(decision.reasons.some((reason) => reason.includes("per-market loss cap")));
 });
