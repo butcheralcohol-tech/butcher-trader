@@ -31,3 +31,19 @@ test("blocks while another contract is open", () => {
 test("fails closed on non-finite broker values", () => {
   assert.equal(evaluateDemoExecutionRisk({ ...base, account: { ...base.account, balance: Number.NaN } }).allowed, false);
 });
+
+test("supports lower configurable daily, market and session loss caps", () => {
+  const decision = evaluateDemoExecutionRisk({ ...base, dailyLossLimitUsd: 15, marketLossLimitUsd: 8, sessionLossLimitUsd: 5, dailyNetPnl: -5 });
+  assert.ok(decision.reasons.some((reason) => reason.includes("per-session loss cap")));
+  assert.ok(decision.reasons.some((reason) => reason.includes("per-market loss cap")));
+});
+
+test("rejects configurable loss limits above the global safety ceiling", () => {
+  const decision = evaluateDemoExecutionRisk({ ...base, dailyLossLimitUsd: 25 });
+  assert.ok(decision.reasons.some((reason) => reason.includes("Daily loss cap")));
+});
+
+test("allows a higher aspirational target while keeping a $24 minimum", () => {
+  assert.equal(evaluateDemoExecutionRisk({ ...base, dailyProfitTargetUsd: 60 }).allowed, true);
+  assert.ok(evaluateDemoExecutionRisk({ ...base, dailyProfitTargetUsd: 10 }).reasons.some((reason) => reason.includes("at least $24") || reason.includes("between $24")));
+});
