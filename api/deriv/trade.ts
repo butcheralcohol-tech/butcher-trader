@@ -5,7 +5,7 @@ import { OAUTH_COOKIE, decryptSession, parseCookies } from "../../shared/oauth-s
 import { evaluateDemoExecutionRisk, type DemoAccount } from "../../shared/demo-execution.js";
 
 type DerivReply = { req_id?: number; error?: { code?: string; message?: string }; authorize?: Record<string, unknown>; balance?: Record<string, unknown>;
-  proposal?: { id?: string; ask_price?: number; payout?: number; longcode?: string };
+  proposal?: { id?: string; ask_price?: number; payout?: number; longcode?: string };\n  contracts_for?: { available?: Array<Record<string, unknown>> };
   buy?: { contract_id?: number; buy_price?: number; transaction_id?: number } };
 const json = (res: ServerResponse, status: number, body: unknown) => {
   res.statusCode = status; res.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -100,18 +100,24 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
   const barrier = body.barrier;
   const takeProfit = numberField(body.takeProfit);
   const stopLoss = numberField(body.stopLoss);
-  const supportedContracts = new Set(["CALL", "PUT", "DIGITUNDER", "DIGITOVER", "DIGITMATCH", "DIGITDIFF", "DIGITEVEN", "DIGITODD", "MULTUP", "MULTDOWN"]);
-  const digitContract = contractType.startsWith("DIGIT");
   const multiplierContract = contractType === "MULTUP" || contractType === "MULTDOWN";
-  const validBarrier = !["DIGITUNDER", "DIGITOVER", "DIGITMATCH", "DIGITDIFF"].includes(contractType) ||
-    (typeof barrier === "string" && /^[0-9]$/.test(barrier));
-  const validDuration = Number.isInteger(duration) && Number(duration) >= 1 && Number(duration) <= (digitContract ? 10 : 10) &&
-    (digitContract ? durationUnit === "t" : durationUnit === "m");
-  if (!/^[A-Z0-9_]{2,32}$/.test(symbol) || !supportedContracts.has(contractType) ||
-      !validDuration || !validBarrier || stake === null || stake <= 0 ||
+  const digitBarrierContract = ["DIGITUNDER", "DIGITOVER", "DIGITMATCH", "DIGITDIFF"].includes(contractType);
+  const barrierContract = digitBarrierContract || ["ONETOUCH", "NOTOUCH", "RANGE", "UPORDOWN", "EXPIRYRANGE", "EXPIRYMISS"].includes(contractType);
+  const durationUnits = new Set(["t", "s", "m", "h", "d"]);
+  const validDuration = Number.isInteger(duration) && Number(duration) >= 1 && Number(duration) <= 365 &&
+    typeof durationUnit === "string" && durationUnits.has(durationUnit);
+  const barrierText = typeof barrier === "string" || typeof barrier === "number" ? String(barrier) : "";
+  const barrier2 = body.barrier2;
+  const barrier2Text = typeof barrier2 === "string" || typeof barrier2 === "number" ? String(barrier2) : "";
+  const validBarrier = !barrierContract || (barrierText.length > 0 && barrierText.length <= 24 &&
+    /^-?\\d+(?:\\.\\d+)?$/.test(barrierText));
+  const validSecondBarrier = contractType !== "RANGE" || (barrier2Text.length > 0 && barrier2Text.length <= 24 &&
+    /^-?\\d+(?:\\.\\d+)?$/.test(barrier2Text) && Number(barrier2Text) !== Number(barrierText));
+  if (!/^[A-Z0-9_]{2,32}$/.test(symbol) || !/^[A-Z0-9_]{2,32}$/.test(contractType) ||
+      !validDuration || !validBarrier || !validSecondBarrier || stake === null || stake <= 0 ||
       (takeProfit !== null && takeProfit <= 0) || (stopLoss !== null && stopLoss <= 0) ||
       ((takeProfit !== null || stopLoss !== null) && !multiplierContract)) {
-    json(res, 400, { error: "Unsupported or invalid contract parameters. Digit contracts require a 0–9 prediction and tick duration; Rise/Fall requires minute duration. Broker take-profit/stop-loss is currently accepted only for multiplier contracts." }); return;
+    json(res, 400, { error: "Invalid contract parameters. Contract availability and exact duration rules are verified against Deriv before a proposal is sent. TP/SL is currently supported only for multiplier contracts." }); return;
   }
   let account: DemoAccount | null = null;
   try {
@@ -187,9 +193,33 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       const markerValue = JSON.stringify({ status: "pending_reconciliation", requestId, symbol, contractType, stake, createdAt: new Date().toISOString() });
       const reserved = await redisCommand<string>(["SET", idempotencyKey, markerValue, "NX", "EX", 86400]);
       if (reserved !== "OK") { json(res, 409, { error: "This idempotency key has already been reserved; reconcile broker history before retrying." }); return; }
+      // Ask Deriv for authoritative contract availability before constructing a proposal.
+      const availabilityReply = await brokerRequest(session.accessToken, [{
+        contracts_for: symbol, currency: account.currency, product_type: "basic"
+      }]);
+      const available = availabilityReply[1]?.contracts_for?.available;
+      if (!Array.isArray(available) || !available.some(item => item.contract_type === contractType)) {
+        json(res, 422, { error: "This contract type is not available for the selected market/account. Refresh contract discovery and choose an available type." }); return;
+      }
+      const meta = available.find(item => item.contract_type === contractType)!;
+      const minDuration = typeof meta.min_contract_duration === "string" ? meta.min_contract_duration : "";
+      const maxDuration = typeof meta.max_contract_duration === "string" ? meta.max_contract_duration : "";
+      const durationSeconds: Record<string, number> = { t: 0, s: 1, m: 60, h: 3600, d: 86400 };
+      const unitSeconds = durationSeconds[String(durationUnit)] ?? -1;
+      const toSeconds = (value: string): number | null => {
+        const match = value.match(/^(\\d+)(t|s|m|h|d)$/);
+        return match ? Number(match[1]) * (durationSeconds[match[2]] || 1) : null;
+      };
+      const minSeconds = toSeconds(minDuration), maxSeconds = toSeconds(maxDuration);
+      const requestedSeconds = Number(duration) * (String(durationUnit) === "t" ? 1 : unitSeconds);
+      if (unitSeconds < 0 || (minSeconds !== null && requestedSeconds < minSeconds) ||
+          (maxSeconds !== null && requestedSeconds > maxSeconds)) {
+        json(res, 422, { error: "Requested duration is outside the broker-advertised range for this contract." }); return;
+      }
       const proposalPayload: Record<string, unknown> = { proposal: 1, amount: stake, basis: "stake",
         contract_type: contractType, currency: account.currency, duration: Number(duration), duration_unit: durationUnit, symbol };
-      if (["DIGITUNDER", "DIGITOVER", "DIGITMATCH", "DIGITDIFF"].includes(contractType)) proposalPayload.barrier = barrier;
+      if (barrierContract) proposalPayload.barrier = barrierText;
+      if (contractType === "RANGE") proposalPayload.barrier2 = barrier2Text;
       if (multiplierContract) {
         proposalPayload.multiplier = 10;
         if (takeProfit !== null || stopLoss !== null) {
