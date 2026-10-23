@@ -12,6 +12,8 @@ export type PaperMeta = {
   strategyIds?: string[];
   strategyParams?: Record<string, Params>;
   consensusPercent?: number;
+  /** Relative vote strength per strategy; omitted entries default to 1. */
+  strategyWeights?: Record<string, number>;
   cfg: SimConfig;
   startedAt: number;
 };
@@ -90,23 +92,35 @@ function consensus(meta: PaperMeta): number {
 }
 
 export function combineStrategySignals(
-  votes: Array<{ name: string; signal: Signal }>,
+  votes: Array<{ name: string; signal: Signal; weight?: number }>,
   strategyCount: number,
   consensusPercent = 60,
+  configuredWeights: number[] = [],
 ): Signal | null {
   if (!Number.isInteger(strategyCount) || strategyCount < 1 || !Number.isFinite(consensusPercent)) return null;
-  const threshold = Math.ceil(strategyCount * Math.min(100, Math.max(50, consensusPercent)) / 100);
+  const safeWeight = (value: number | undefined) => Number.isFinite(value) && value! >= 0.1 && value! <= 5 ? value! : 1;
+  const totalWeight = configuredWeights.length === strategyCount
+    ? configuredWeights.reduce((sum, value) => sum + safeWeight(value), 0)
+    : strategyCount;
+  const threshold = totalWeight * Math.min(100, Math.max(50, consensusPercent)) / 100;
+  const weightOf = (vote: { weight?: number }) => safeWeight(vote.weight);
   const longs = votes.filter(v => v.signal.side === "LONG");
   const shorts = votes.filter(v => v.signal.side === "SHORT");
-  const winners = longs.length >= threshold ? longs : shorts.length >= threshold ? shorts : [];
+  const longWeight = longs.reduce((sum, v) => sum + weightOf(v), 0);
+  const shortWeight = shorts.reduce((sum, v) => sum + weightOf(v), 0);
+  const winners = longWeight >= threshold ? longs : shortWeight >= threshold ? shorts : [];
   if (!winners.length) return null;
   const side = winners[0].signal.side;
-  const average = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / values.length;
+  const weightedAverage = (pick: (signal: Signal) => number) => {
+    const weight = winners.reduce((sum, v) => sum + weightOf(v), 0);
+    return winners.reduce((sum, v) => sum + pick(v.signal) * weightOf(v), 0) / weight;
+  };
+  const winningWeight = side === "LONG" ? longWeight : shortWeight;
   return {
     side,
-    stop: average(winners.map(v => v.signal.stop)),
-    target: average(winners.map(v => v.signal.target)),
-    reason: `Ensemble ${winners.length}/${strategyCount} vote(s) for ${side} (required ${threshold}/${strategyCount}): ${winners.map(v => `${v.name} — ${v.signal.reason}`).join("; ")}`,
+    stop: weightedAverage(signal => signal.stop),
+    target: weightedAverage(signal => signal.target),
+    reason: `Weighted ensemble ${winningWeight.toFixed(2)}/${totalWeight.toFixed(2)} weight for ${side} (required ${threshold.toFixed(2)}): ${winners.map(v => `${v.name} [w=${weightOf(v)}] — ${v.signal.reason}`).join("; ")}`,
   };
 }
 
@@ -135,17 +149,19 @@ export function advancePaper(session: PaperSession, closed: Candle[]): PaperSess
   const evaluators = ids.map(id => {
     const strategy = getStrategy(id);
     const params = meta.strategyParams?.[id] ?? (id === meta.strategyId ? meta.params : defaultParams(strategy));
-    return { strategy, evaluate: strategy.create(closed, clampParams(strategy, params)) };
+    const configuredWeight = meta.strategyWeights?.[id];
+    const weight = Number.isFinite(configuredWeight) && configuredWeight! >= 0.1 && configuredWeight! <= 5 ? configuredWeight! : 1;
+    return { strategy, weight, evaluate: strategy.create(closed, clampParams(strategy, params)) };
   });
   fresh.forEach((c, k) => {
     const i = offset + k;
     stepCandle(state, c, replayOnly ? null : () => {
       // Keep the ensemble's vote aggregation deterministic; the same closed candle cannot be processed twice.
-      const votes = evaluators.flatMap(({ strategy, evaluate }) => {
+      const votes = evaluators.flatMap(({ strategy, weight, evaluate }) => {
         const signal = evaluate(i);
-        return signal ? [{ name: strategy.name, signal }] : [];
+        return signal ? [{ name: strategy.name, signal, weight }] : [];
       });
-      return combineStrategySignals(votes, ids.length, consensus(meta));
+      return combineStrategySignals(votes, ids.length, consensus(meta), evaluators.map(item => item.weight));
     }, meta.cfg);
   });
   if (state.events.length > MAX_EVENTS) state.events = state.events.slice(-MAX_EVENTS);
