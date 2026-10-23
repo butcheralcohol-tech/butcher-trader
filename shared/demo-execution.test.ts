@@ -47,3 +47,15 @@ test("allows a higher aspirational target while keeping a $24 minimum", () => {
   assert.equal(evaluateDemoExecutionRisk({ ...base, dailyProfitTargetUsd: 60 }).allowed, true);
   assert.ok(evaluateDemoExecutionRisk({ ...base, dailyProfitTargetUsd: 10 }).reasons.some((reason) => reason.includes("at least $24") || reason.includes("between $24")));
 });
+
+test("blocks on market loss using market-specific broker PnL", () => {
+  const decision = evaluateDemoExecutionRisk({ ...base, dailyNetPnl: 0, marketNetPnl: -8, marketLossLimitUsd: 8 });
+  assert.ok(decision.reasons.some((reason) => reason.includes("per-market loss cap")));
+});
+test("blocks on rolling-session loss independently of daily PnL", () => {
+  const decision = evaluateDemoExecutionRisk({ ...base, dailyNetPnl: 0, sessionNetPnl: -5, sessionLossLimitUsd: 5 });
+  assert.ok(decision.reasons.some((reason) => reason.includes("per-session loss cap")));
+});
+test("accepts a properly formatted broker virtual account ID", () => {
+  assert.equal(evaluateDemoExecutionRisk(base).allowed, true);
+});
