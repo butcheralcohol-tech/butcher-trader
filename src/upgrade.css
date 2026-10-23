@@ -37,3 +37,101 @@ td:last-child{white-space:normal}th{position:sticky;top:0;background:#111115;col
 .tag.exit{color:#5cd59c;border-color:#295b45}.tag.gate_blocked,.tag.skipped{color:#ed6069;border-color:#5b282d}
 @media(max-width:950px){.fields.four,.fields.six{grid-template-columns:repeat(2,minmax(0,1fr))}.two-col{grid-template-columns:1fr}.price-top{flex-wrap:wrap;gap:8px}}
 @media(max-width:650px){.mobile-nav{display:flex}.fields.four,.fields.six{grid-template-columns:1fr}.metrics-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.panel{padding:14px}}
+
+
+/* BUTCHER TRADER // FUTURE CONTROL SURFACE — black, graphite and crimson retained */
+:root{
+  color-scheme:dark;
+  --bt-bg:#07080b;--bt-panel:#0d1016;--bt-panel2:#11151d;--bt-line:#282d38;
+  --bt-red:#e1323b;--bt-red-hot:#ff3547;--bt-muted:#8992a3;--bt-white:#f4f6fb;
+}
+html{background:var(--bt-bg)}
+body{
+  color:var(--bt-white);
+  background:
+    radial-gradient(ellipse at 72% -12%,rgba(225,50,59,.13),transparent 38%),
+    radial-gradient(ellipse at 10% 48%,rgba(225,50,59,.045),transparent 32%),
+    linear-gradient(rgba(255,255,255,.018) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.018) 1px,transparent 1px),
+    var(--bt-bg);
+  background-size:auto,auto,36px 36px,36px 36px,auto;
+}
+.app-shell{background:transparent}
+.sidebar{
+  background:linear-gradient(180deg,rgba(13,16,22,.97),rgba(7,8,11,.98));
+  border-right:1px solid #30313a;box-shadow:12px 0 36px rgba(0,0,0,.18);
+  position:relative;
+}
+.sidebar:after{content:"";position:absolute;top:0;right:-1px;width:1px;height:190px;background:linear-gradient(transparent,var(--bt-red),transparent);opacity:.8}
+.brand{padding-bottom:34px}
+.brand-mark{
+  width:42px;height:42px;border:1px solid var(--bt-red);border-radius:9px;
+  background:linear-gradient(145deg,rgba(225,50,59,.22),rgba(225,50,59,.025));
+  box-shadow:0 0 24px rgba(225,50,59,.12),inset 0 0 14px rgba(225,50,59,.07);
+}
+.brand b{letter-spacing:2.4px}
+.brand small,.side-bottom small{letter-spacing:1.5px}
+.nav-item,button.nav-item{
+  border-radius:7px!important;transition:background .18s ease,border-color .18s ease,color .18s ease;
+  position:relative;
+}
+button.nav-item.active,.nav-item.active{
+  background:linear-gradient(90deg,rgba(225,50,59,.16),rgba(225,50,59,.025))!important;
+  border-color:rgba(225,50,59,.38)!important;box-shadow:inset 2px 0 var(--bt-red),0 0 18px rgba(225,50,59,.035);
+}
+button.nav-item:hover,.nav-item:hover{background:rgba(255,255,255,.035);border-color:#363b46}
+main,.main-content,.workspace{min-width:0}
+.topbar,.top-bar,.page-header{
+  border-bottom:1px solid rgba(137,146,163,.16);
+}
+h1,h2,h3,.section-heading,.page-title{
+  letter-spacing:-.035em;text-wrap:balance;
+}
+h1,.page-title{ text-shadow:0 0 26px rgba(225,50,59,.08)}
+.panel,.card,.metric-card,.stat-card,.chart-card,.section-card{
+  background:linear-gradient(145deg,rgba(17,21,29,.94),rgba(10,12,17,.96));
+  border:1px solid var(--bt-line);border-radius:12px;
+  box-shadow:0 12px 32px rgba(0,0,0,.16),inset 0 1px rgba(255,255,255,.025);
+  position:relative;overflow:hidden;
+}
+.panel:before,.card:before,.metric-card:before,.stat-card:before,.chart-card:before,.section-card:before{
+  content:"";position:absolute;left:16px;right:16px;top:0;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(225,50,59,.5),transparent);pointer-events:none;
+}
+.panel .card-title,.card-title{letter-spacing:.09em}
+button,.primary-btn,.ghost-btn,select,input,textarea{
+  transition:border-color .18s ease,background .18s ease,box-shadow .18s ease,transform .18s ease;
+}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{
+  outline:2px solid rgba(255,53,71,.82);outline-offset:2px;
+}
+.primary-btn{
+  border-radius:7px!important;border:1px solid #f04450!important;
+  background:linear-gradient(135deg,#f13a47,#a91e2a)!important;
+  box-shadow:0 5px 18px rgba(225,50,59,.15),inset 0 1px rgba(255,255,255,.14);
+  letter-spacing:.045em;
+}
+.primary-btn:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 8px 24px rgba(225,50,59,.25)}
+.ghost-btn,button.nav-item,.mobile-nav button,.tf-switch button{
+  border-radius:7px;
+}
+input,select,textarea,.panel select,.fields select{
+  background-color:#090c12;border-color:#303744;border-radius:7px;color:#f4f6fb;
+}
+input:hover,select:hover,textarea:hover{border-color:#525b6b}
+input:focus,select:focus,textarea:focus{border-color:rgba(225,50,59,.8);box-shadow:0 0 0 3px rgba(225,50,59,.09);outline:none}
+.mobile-nav button{border-radius:7px}
+.mobile-nav button.on,.tf-switch button.on{
+  background:linear-gradient(135deg,rgba(225,50,59,.2),rgba(225,50,59,.05));
+  box-shadow:inset 0 0 0 1px rgba(225,50,59,.12);
+}
+table{border-collapse:separate;border-spacing:0}
+th{background:#121720;color:#9ba5b6;letter-spacing:1.2px}
+tbody tr:hover td{background:rgba(255,255,255,.018)}
+.tag{border-radius:4px;letter-spacing:.04em}
+.feed-note,.verdict{border-radius:7px}
+.equity-wrap svg{border-radius:8px;background:linear-gradient(180deg,#10151d,#090c12)}
+.chart-empty{background:radial-gradient(ellipse,rgba(225,50,59,.04),transparent 65%)}
+@media(prefers-reduced-motion:reduce){
+  *,*:before,*:after{scroll-behavior:auto!important;transition:none!important;animation:none!important}
+}
