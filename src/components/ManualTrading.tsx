@@ -8,7 +8,7 @@ import { MARKETS } from "../lib/markets";
 
 type Side = "LONG" | "SHORT";
 type ManualPosition = { side: Side; entry: number; stake: number; openedAt: number };
-type ClosedTrade = { side: Side; entry: number; exit: number; stake: number; pnl: number; openedAt: number; closedAt: number };
+type ClosedTrade = { side: Side; entry: number; exit: number; stake: number; pnl: number; openedAt: number; closedAt: number };\ntype DiscoveredContract = { contractType: string; label: string; category: string; minDuration: unknown; maxDuration: unknown; barriers?: unknown; expiryType?: unknown };
 const BROKER_CONTRACTS = [
   { value: "CALL", label: "Rise / CALL", unit: "m", barrier: false, limits: false },
   { value: "PUT", label: "Fall / PUT", unit: "m", barrier: false, limits: false },
@@ -38,17 +38,20 @@ export default function ManualTrading() {
   const [brokerMessage, setBrokerMessage] = useState("Connect a Deriv virtual account before placing demo orders.");
   const [brokerOrders, setBrokerOrders] = useState<Array<Record<string, unknown>>>([]);
   const [brokerAccount, setBrokerAccount] = useState("");
-  const [discoveredContracts, setDiscoveredContracts] = useState<Array<{ contractType: string; label: string; category: string; minDuration: unknown; maxDuration: unknown }>>([]);
+  const [discoveredContracts, setDiscoveredContracts] = useState<DiscoveredContract[]>([]);\n  const [durationUnit, setDurationUnit] = useState("m");\n  const [barrier2, setBarrier2] = useState("");
   const [discoveryMessage, setDiscoveryMessage] = useState("Connect Deriv to load market-specific contract availability.");
   useEffect(() => {
     let active = true;
     setDiscoveryMessage("Checking Deriv contract availability…");
     fetch(`/api/deriv/contracts?symbol=${encodeURIComponent(symbol)}`, { credentials: "same-origin", cache: "no-store" })
       .then(async response => {
-        const data = await response.json() as { error?: string; contracts?: Array<{ contractType: string; label: string; category: string; minDuration: unknown; maxDuration: unknown }> };
+        const data = await response.json() as { error?: string; contracts?: DiscoveredContract[] };
         if (!response.ok) throw new Error(data.error || "Contract discovery is unavailable.");
         if (!active) return;
         setDiscoveredContracts(Array.isArray(data.contracts) ? data.contracts : []);
+        if (Array.isArray(data.contracts) && data.contracts.length && !data.contracts.some(item => item.contractType === contractType)) {
+          setContractType(data.contracts.some(item => item.contractType === "CALL") ? "CALL" : data.contracts[0].contractType);
+        }
         setDiscoveryMessage(`Deriv returned ${Array.isArray(data.contracts) ? data.contracts.length : 0} available contract types for ${symbol}. The order menu remains limited to types implemented by the order endpoint.`);
       })
       .catch(error => {
@@ -125,10 +128,10 @@ export default function ManualTrading() {
       {discoveredContracts.length > 0 && <details className="contract-discovery"><summary>View broker-discovered contract types ({discoveredContracts.length})</summary><div className="table-wrap"><table><thead><tr><th>Type</th><th>Category</th><th>Duration range</th></tr></thead><tbody>{discoveredContracts.map(contract => <tr key={contract.contractType}><td>{contract.label} <small>({contract.contractType})</small></td><td>{contract.category || "—"}</td><td>{String(contract.minDuration ?? "—")} – {String(contract.maxDuration ?? "—")}</td></tr>)}</tbody></table></div></details>}
       <div className="fields four">
         <label>Market<select value={symbol} disabled={brokerBusy} onChange={e => setSymbol(e.target.value)}>{MARKETS.map(m => <option key={m.symbol} value={m.symbol}>{m.name} ({m.symbol})</option>)}</select></label>
-        <label>Contract<select value={contractType} disabled={brokerBusy} onChange={e => setContractType(e.target.value)}>{BROKER_CONTRACTS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></label>
+        <label>Contract<select value={contractType} disabled={brokerBusy} onChange={e => { setContractType(e.target.value); const found = discoveredContracts.find(item => item.contractType === e.target.value); const unit = typeof found?.minDuration === "string" ? String(found.minDuration).match(/[tsmhd]$/)?.[0] : null; if (unit) setDurationUnit(unit); }}>{(discoveredContracts.length ? discoveredContracts : BROKER_CONTRACTS.map(c => ({ contractType: c.value, label: c.label, category: "", minDuration: null, maxDuration: null }))).map(c => <option key={c.contractType} value={c.contractType}>{c.label} ({c.contractType})</option>)}</select></label>
         <label>Contract stake ($)<input type="number" min="0.01" step="0.01" value={brokerStake} disabled={brokerBusy} onChange={e => setBrokerStake(Number(e.target.value))} /></label>
-        <label>Duration ({selectedContract.unit === "t" ? "ticks" : "minutes"})<select value={duration} disabled={brokerBusy} onChange={e => setDuration(Number(e.target.value))}>{(selectedContract.unit === "t" ? [1,2,3,4,5,6,7,8,9,10] : [1,2,3,5,10]).map(n => <option key={n} value={n}>{n} {selectedContract.unit === "t" ? (n === 1 ? "tick" : "ticks") : (n === 1 ? "minute" : "minutes")}</option>)}</select></label>
-        {selectedContract.barrier && <label>Digit prediction (0–9)<input type="number" min="0" max="9" step="1" value={barrier} disabled={brokerBusy} onChange={e => setBarrier(e.target.value)} /></label>}
+        <label>Duration unit<select value={selectedContract.unit === "t" ? "t" : durationUnit} disabled={brokerBusy || selectedContract.unit === "t"} onChange={e => setDurationUnit(e.target.value)}>{["t","s","m","h","d"].map(unit => <option key={unit} value={unit}>{({t:"Ticks",s:"Seconds",m:"Minutes",h:"Hours",d:"Days"} as Record<string,string>)[unit]}</option>)}</select></label><label>Duration value<input type="number" min="1" max="365" step="1" value={duration} disabled={brokerBusy} onChange={e => setDuration(Number(e.target.value))} /></label>
+        {selectedContract.barrier && <><label>{contractType.startsWith("DIGIT") ? "Digit prediction (0–9)" : "Barrier / level"}<input type="number" min={contractType.startsWith("DIGIT") ? 0 : undefined} max={contractType.startsWith("DIGIT") ? 9 : undefined} step="any" value={barrier} disabled={brokerBusy} onChange={e => setBarrier(e.target.value)} /></label>{contractType === "RANGE" && <label>Second barrier / upper level<input type="number" step="any" value={barrier2} disabled={brokerBusy} onChange={e => setBarrier2(e.target.value)} /></label>}</>}
         {selectedContract.limits && <label>Take-profit amount ($, optional)<input type="number" min="0.01" step="0.01" value={takeProfit} disabled={brokerBusy} placeholder="No take profit" onChange={e => setTakeProfit(e.target.value)} /></label>}
         {selectedContract.limits && <label>Stop-loss amount ($, optional)<input type="number" min="0.01" step="0.01" value={stopLoss} disabled={brokerBusy} placeholder="No stop loss" onChange={e => setStopLoss(e.target.value)} /></label>}
       </div>
