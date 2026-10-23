@@ -36,7 +36,8 @@ async function releaseLock(key: string, owner: string): Promise<void> {
   await redisCommand<number>(["EVAL", "if redis.call(\'get\', KEYS[1]) == ARGV[1] then return redis.call(\'del\', KEYS[1]) else return 0 end", 1, key, owner]);
 }
 async function brokerRequest(token: string, payloads: Record<string, unknown>[]): Promise<DerivReply[]> {
-  const appId = process.env.DERIV_APP_ID?.trim() || process.env.VITE_DERIV_APP_ID?.trim();
+  // Never read public VITE_* variables for server-side broker credentials/configuration.
+  const appId = process.env.DERIV_APP_ID?.trim();
   if (!appId || !/^\d+$/.test(appId)) throw new Error("Server-side DERIV_APP_ID is not configured.");
   const endpoint = process.env.DERIV_TRADING_WS_URL?.trim() || `wss://ws.derivws.com/websockets/v3?app_id=${encodeURIComponent(appId)}`;
   if (!endpoint.startsWith("wss://")) throw new Error("Deriv trading endpoint must use secure WebSocket.");
