@@ -29,7 +29,7 @@ async function redisCommand<T>(command: (string | number)[]): Promise<T | null> 
 }
 async function acquireLock(key: string): Promise<string | null> {
   const owner = randomUUID();
-  return (await redisCommand<string>(["SET", key, owner, "NX", "EX", 120])) === "OK" ? owner : null;
+  return (await redisCommand<string>(["SET", key, owner, "NX", "EX", 180])) === "OK" ? owner : null;
 }
 async function releaseLock(key: string, owner: string): Promise<void> {
   await redisCommand<number>(["EVAL", "if redis.call(\'get\', KEYS[1]) == ARGV[1] then return redis.call(\'del\', KEYS[1]) else return 0 end", 1, key, owner]);
@@ -102,23 +102,39 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       durationUnit !== "m" || stake === null || stake <= 0) {
     json(res, 400, { error: "Invalid order. Use a valid symbol, CALL/PUT, 1–10 minutes, and a positive stake." }); return;
   }
-  let account: DemoAccount | null = null;
+  let lock: { key: string; owner: string } | null = null;
+  let buySent = false; // once true, any failure means the broker may hold a contract we have not confirmed
   try {
-    const authReplies = await brokerRequest(session.accessToken, [{ balance: 1 }, { portfolio: 1 }, { profit_table: 1, description: 1, limit: 500, offset: 0, sort: "DESC" }]);
-    const auth = authReplies[0].authorize;
-    if (!auth) throw new Error("No broker authorization response.");
-    account = { loginid: String(auth.loginid ?? ""), is_virtual: auth.is_virtual === 1 ? 1 : 0,
-      currency: String(auth.currency ?? ""), balance: numberField(auth.balance) ?? 0 };
-    if (account.is_virtual !== 1 || !/^VRTC\d+$/.test(account.loginid)) {
+    // 1) Identify the account first. The lock is per account and must be held BEFORE any risk check, otherwise two
+    //    near-simultaneous requests could both pass "no open contract" and "daily loss" checks on stale data.
+    const identity = (await brokerRequest(session.accessToken, []))[0].authorize;
+    if (!identity) throw new Error("No broker authorization response.");
+    const loginid = String(identity.loginid ?? "");
+    if (identity.is_virtual !== 1 || !/^VRTC\d+$/.test(loginid)) {
       json(res, 403, { error: "This endpoint only permits broker-verified Deriv virtual accounts." }); return;
     }
+    const storagePrefix = `butcher:demo:${loginid}`;
+    const idempotencyKey = storagePrefix + ":idempotency:" + requestId;
+    const previous = await redisCommand<string>(["GET", idempotencyKey]);
+    if (previous) { json(res, 409, { ...JSON.parse(previous), replayed: true, message: "This request key was already used; reconcile broker history before retrying." }); return; }
+    const lockKey = storagePrefix + ":execution-lock";
+    const lockOwner = await acquireLock(lockKey);
+    if (!lockOwner) { json(res, 423, { error: "Another order is being processed. Reconcile order history before retrying." }); return; }
+    lock = { key: lockKey, owner: lockOwner };
+
+    // 2) Fresh broker-authoritative state, read while holding the lock.
+    const authReplies = await brokerRequest(session.accessToken, [{ balance: 1 }, { portfolio: 1 }, { profit_table: 1, description: 1, limit: 500, offset: 0, sort: "DESC" }]);
+    const auth = authReplies[0].authorize;
+    if (!auth || String(auth.loginid ?? "") !== loginid) throw new Error("Broker account changed during the request; no order was sent.");
+    let account: DemoAccount = { loginid, is_virtual: 1, currency: String(auth.currency ?? ""), balance: numberField(auth.balance) ?? 0 };
     const balanceReply = authReplies[1].balance as Record<string, unknown> | undefined;
     const brokerBalance = numberField(balanceReply?.balance);
     const currency = typeof balanceReply?.currency === "string" ? balanceReply.currency : account.currency;
     if (brokerBalance === null || currency !== account.currency) throw new Error("Could not verify the broker balance and currency.");
     account = { ...account, balance: brokerBalance };
     const portfolio = authReplies[2] as unknown as { portfolio?: { contracts?: Array<unknown> } };
-    const openContracts = Array.isArray(portfolio.portfolio?.contracts) ? portfolio.portfolio.contracts.length : 0;
+    if (!Array.isArray(portfolio.portfolio?.contracts)) throw new Error("Broker portfolio is unavailable; fail closed.");
+    const openContracts = portfolio.portfolio.contracts.length;
     const profits = authReplies[3] as unknown as { profit_table?: { transactions?: Array<Record<string, unknown>> } };
     const transactions = profits.profit_table?.transactions;
     if (!Array.isArray(transactions)) throw new Error("Broker profit history is unavailable; fail closed.");
@@ -131,36 +147,30 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     const risk = evaluateDemoExecutionRisk({ account, stake, dailyNetPnl, dailyLossLimitUsd: 20,
       dailyProfitTargetUsd: 40, riskPercent: 1, openContracts, maxOpenContracts: 1 });
     if (!risk.allowed) { json(res, 423, { error: "Risk checks blocked this order.", reasons: risk.reasons, maxStake: risk.maxStake, dailyNetPnl }); return; }
-    const storagePrefix = `butcher:demo:${account.loginid}`;
-    const idempotencyKey = storagePrefix + ":idempotency:" + requestId;
-    const previous = await redisCommand<string>(["GET", idempotencyKey]);
-    if (previous) { json(res, 409, { ...JSON.parse(previous), replayed: true, message: "This request key was already used; reconcile broker history before retrying." }); return; }
-    const lockKey = storagePrefix + ":execution-lock";
-    const lockOwner = await acquireLock(lockKey);
-    if (!lockOwner) { json(res, 423, { error: "Another order is being processed. Reconcile order history before retrying." }); return; }
-    try {
-      const markerValue = JSON.stringify({ status: "pending_reconciliation", requestId, symbol, contractType, stake, createdAt: new Date().toISOString() });
-      const reserved = await redisCommand<string>(["SET", idempotencyKey, markerValue, "NX", "EX", 86400]);
-      if (reserved !== "OK") { json(res, 409, { error: "This idempotency key has already been reserved; reconcile broker history before retrying." }); return; }
-      const proposal = await brokerRequest(session.accessToken, [{ proposal: 1, amount: stake, basis: "stake",
-        contract_type: contractType, currency: account.currency, duration: Number(duration), duration_unit: "m", symbol }]);
-      const proposalData = proposal[1]?.proposal;
-      if (!proposalData?.id || numberField(proposalData.ask_price) === null) throw new Error("Broker proposal was incomplete; no buy request was sent.");
-      const buy = await brokerRequest(session.accessToken, [{ buy: String(proposalData.id), price: stake }]);
-      const receipt = buy[1]?.buy;
-      if (!receipt?.contract_id || numberField(receipt.buy_price) === null) throw new Error("Broker buy receipt was not confirmed. Reconcile account history before retrying.");
-      const result = { status: "open", mode: "demo", account: account.loginid, contractId: receipt.contract_id,
-        transactionId: receipt.transaction_id ?? null, symbol, contractType, stake: receipt.buy_price, currency: account.currency,
-        proposalPayout: proposalData.payout ?? null, dailyNetPnlAtEntry: dailyNetPnl, submittedAt: new Date().toISOString(),
-        brokerConfirmed: true, liveTradingEnabled: false };
-      await redisCommand(["SET", `${storagePrefix}:idempotency:${requestId}`, JSON.stringify(result), "EX", 86400]);
-      await redisCommand(["SET", `${storagePrefix}:contract:${receipt.contract_id}`, JSON.stringify(result), "EX", 604800]);
-      json(res, 201, result);
-    } finally {
-      await releaseLock(lockKey, lockOwner).catch(() => null);
-    }
+
+    // 3) Reserve the idempotency key, price, buy.
+    const markerValue = JSON.stringify({ status: "pending_reconciliation", requestId, symbol, contractType, stake, createdAt: new Date().toISOString() });
+    const reserved = await redisCommand<string>(["SET", idempotencyKey, markerValue, "NX", "EX", 86400]);
+    if (reserved !== "OK") { json(res, 409, { error: "This idempotency key has already been reserved; reconcile broker history before retrying." }); return; }
+    const proposal = await brokerRequest(session.accessToken, [{ proposal: 1, amount: stake, basis: "stake",
+      contract_type: contractType, currency: account.currency, duration: Number(duration), duration_unit: "m", symbol }]);
+    const proposalData = proposal[1]?.proposal;
+    if (!proposalData?.id || numberField(proposalData.ask_price) === null) throw new Error("Broker proposal was incomplete; no buy request was sent.");
+    buySent = true;
+    const buy = await brokerRequest(session.accessToken, [{ buy: String(proposalData.id), price: stake }]);
+    const receipt = buy[1]?.buy;
+    if (!receipt?.contract_id || numberField(receipt.buy_price) === null) throw new Error("Broker buy receipt was not confirmed. Reconcile account history before retrying.");
+    const result = { status: "open", mode: "demo", account: account.loginid, contractId: receipt.contract_id,
+      transactionId: receipt.transaction_id ?? null, symbol, contractType, stake: receipt.buy_price, currency: account.currency,
+      proposalPayout: proposalData.payout ?? null, dailyNetPnlAtEntry: dailyNetPnl, submittedAt: new Date().toISOString(),
+      brokerConfirmed: true, liveTradingEnabled: false };
+    await redisCommand(["SET", idempotencyKey, JSON.stringify(result), "EX", 86400]);
+    await redisCommand(["SET", `${storagePrefix}:contract:${receipt.contract_id}`, JSON.stringify(result), "EX", 604800]);
+    json(res, 201, result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Demo execution failed closed.";
-    json(res, 503, { error: message, noRetryUntilReconciled: message.includes("timed out") || message.includes("status must be reconciled"), liveTradingEnabled: false });
+    json(res, 503, { error: message, noRetryUntilReconciled: buySent || message.includes("timed out") || message.includes("reconciled"), liveTradingEnabled: false });
+  } finally {
+    if (lock) await releaseLock(lock.key, lock.owner).catch(() => null);
   }
 }

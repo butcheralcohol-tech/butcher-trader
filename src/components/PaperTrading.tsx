@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Download, Play, RotateCcw, ScrollText } from "lucide-react";
 import { GRANULARITIES } from "../../shared/candles.js";
 import { DEFAULT_SIM } from "../../shared/sim.js";
+import { latestEventTime, newRobotOrders } from "../../shared/robot-signals.js";
 import { TRADING_POLICY } from "../../shared/trading-config.js";
 import { defaultParams, getStrategy, strategies } from "../../shared/strategy.js";
 import { clock, clockSeconds, downloadText, eventsToCsv, fmt, money, signedMoney } from "../lib/format";
@@ -27,39 +28,37 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
   const [brokerExecution, setBrokerExecution] = useState(false);
   const [brokerStake, setBrokerStake] = useState(2);
   const [brokerExecutionMessage, setBrokerExecutionMessage] = useState("Off — robot trades are paper-only until demo execution is explicitly enabled.");
-  const processedEventCount = useRef(0);
+  // Candle time of the newest paper fill already handled. Only fills after this are mirrored, so arming never replays history.
+  const handledUpTo = useRef(0);
+  const sending = useRef(false);
 
   useEffect(() => {
     const events = session?.state.events ?? [];
-    const newEvents = events.slice(processedEventCount.current);
-    processedEventCount.current = events.length;
-    if (!brokerExecution || !session || !newEvents.length) return;
-    const fills = newEvents.map((event, index) => ({ event, index })).filter(({ event }) => event.type === "FILLED");
-    if (!fills.length) return;
-    let cancelled = false;
-    const execute = async () => {
-      for (const { event, index } of fills) {
-        if (cancelled) return;
-        const contractType = /PAPER LONG/.test(event.message) ? "CALL" : /PAPER SHORT/.test(event.message) ? "PUT" : null;
-        if (!contractType) continue;
-        setBrokerExecutionMessage(`Sending robot ${contractType} signal to Deriv demo account…`);
-        try {
-          const key = `robot_${session.meta.startedAt}_${event.time}_${processedEventCount.current - newEvents.length + index}`;
-          const response = await fetch("/api/deriv/trade", {
-            method: "POST", credentials: "same-origin",
-            headers: { "Content-Type": "application/json", "Idempotency-Key": key },
-            body: JSON.stringify({ symbol: session.meta.symbol, contractType, duration: 1, durationUnit: "m", stake: brokerStake }),
-          });
-          const data = await response.json() as { error?: string; reasons?: string[]; contractId?: number; status?: string; account?: string; stake?: number; currency?: string };
-          if (!response.ok) throw new Error([data.error, ...(data.reasons || [])].filter(Boolean).join(" "));
-          setBrokerExecutionMessage(`Deriv confirmed robot contract #${data.contractId} · ${data.stake} ${data.currency} · ${data.status}.`);
-        } catch (error) {
-          setBrokerExecutionMessage(error instanceof Error ? `Robot order blocked/failed: ${error.message}` : "Robot order failed; check broker history before retrying.");
+    if (!brokerExecution || !session || sending.current) return;
+    const orders = newRobotOrders(events, handledUpTo.current, session.meta.startedAt, session.meta.symbol);
+    if (!orders.length) return;
+    handledUpTo.current = Math.max(...orders.map(o => o.time)); // advance first: an order is never sent twice from this page
+    sending.current = true;
+    const { symbol } = session.meta;
+    void (async () => {
+      try {
+        for (const order of orders) {
+          setBrokerExecutionMessage(`Sending robot ${order.contractType} signal to Deriv demo account…`);
+          try {
+            const response = await fetch("/api/deriv/trade", {
+              method: "POST", credentials: "same-origin",
+              headers: { "Content-Type": "application/json", "Idempotency-Key": order.idempotencyKey },
+              body: JSON.stringify({ symbol, contractType: order.contractType, duration: 1, durationUnit: "m", stake: brokerStake }),
+            });
+            const data = await response.json() as { error?: string; reasons?: string[]; contractId?: number; status?: string; stake?: number; currency?: string; noRetryUntilReconciled?: boolean };
+            if (!response.ok) throw new Error([data.error, ...(data.reasons || [])].filter(Boolean).join(" ") + (data.noRetryUntilReconciled ? " Check broker history before trusting this order." : ""));
+            setBrokerExecutionMessage(`Deriv confirmed robot contract #${data.contractId} · ${data.stake} ${data.currency} · ${data.status}.`);
+          } catch (error) {
+            setBrokerExecutionMessage(error instanceof Error ? `Robot order blocked/failed: ${error.message}` : "Robot order failed; check broker history before retrying.");
+          }
         }
-      }
-    };
-    void execute();
-    return () => { cancelled = true; };
+      } finally { sending.current = false; }
+    })();
   }, [session?.state.events, session?.meta.startedAt, session?.meta.symbol, brokerExecution, brokerStake]);
 
   const begin = () => {
@@ -132,7 +131,7 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
         <p className="hint">When enabled, each newly risk-approved paper-bot entry signal is mirrored as a Deriv virtual CALL/PUT contract. Broker-side risk checks still decide whether the order is allowed. This does not mirror paper exits; check broker-confirmed history for settlement. Never enable this unless you are connected to a Deriv virtual account.</p>
         <div className="fields four">
           <label>Broker demo stake ($)<input type="number" min="0.01" step="0.01" value={brokerStake} disabled={brokerExecution} onChange={e => setBrokerStake(Number(e.target.value))} /></label>
-          <label className="bot-mode"><input type="checkbox" checked={brokerExecution} onChange={e => { setBrokerExecution(e.target.checked); setBrokerExecutionMessage(e.target.checked ? "Armed for new paper-bot fills. Existing signals will not be replayed." : "Off — no new robot orders will be sent."); }} /> Enable broker demo orders</label>
+          <label className="bot-mode"><input type="checkbox" checked={brokerExecution} onChange={e => { if (e.target.checked) handledUpTo.current = latestEventTime(session?.state.events ?? []); setBrokerExecution(e.target.checked); setBrokerExecutionMessage(e.target.checked ? "Armed for new paper-bot fills. Existing signals will not be replayed." : "Off — no new robot orders will be sent."); }} /> Enable broker demo orders</label>
         </div>
         <p className="hint" role="status">{brokerExecutionMessage}</p>
       </section>
