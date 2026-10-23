@@ -61,7 +61,7 @@ export default function ManualTrading() {
         method: "POST", credentials: "same-origin",
         headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
         body: JSON.stringify({
-          symbol, contractType, duration, durationUnit: selectedContract.unit, stake,
+          symbol, contractType, duration, durationUnit: selectedContract.unit, stake: brokerStake,
           ...(selectedContract.barrier ? { barrier } : {}),
           ...(selectedContract.limits ? {
             ...(takeProfit.trim() ? { takeProfit: Number(takeProfit) } : {}),
