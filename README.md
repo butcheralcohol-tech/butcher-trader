@@ -76,3 +76,15 @@ Research starter, not financial advice or a profitable-strategy claim. Risk limi
 
 
 - Set the repository Actions variable `DERIV_APP_ID` to your registered public Deriv app ID if needed; the workflow otherwise uses the public-feed fallback ID. This check needs no account token.
+
+
+## Authenticated Deriv demo execution milestone (in review)
+
+- `POST /api/deriv/trade` is a server-side, authenticated **demo-only** order path. It decrypts the HTTP-only OAuth session, authorizes with Deriv, verifies the selected account is a virtual `VRTC` account, obtains broker balance/portfolio/profit history, applies a maximum 1% stake cap, pauses at the $20 daily loss cap or $40 aspirational profit target, permits at most one open contract, requests a broker proposal, and submits a buy only after the checks pass.
+- `GET /api/deriv/trades` reconciles stored contract IDs against the broker's current open portfolio and closed profit table. A contract absent from both sources is explicitly marked `unreconciled`; it is never silently reported as closed.
+- Both endpoints require `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`. Redis is used for durable idempotency keys, order records, and a per-account execution lock. Missing/unavailable durable storage fails closed.
+- The order endpoint requires an `Idempotency-Key` request header (16–100 letters, digits, underscores or hyphens) to prevent a client retry from intentionally submitting the same request twice. If an order response times out, reconcile the account/history before any retry.
+- Server-only settings: `DERIV_APP_ID`, optional secure `DERIV_TRADING_WS_URL`, OAuth settings, and the Upstash Redis REST credentials. Do not expose these as `VITE_*` values. Set the same environment variables in local development and Vercel, then redeploy.
+- Test coverage added for the pure demo execution risk gate: non-demo accounts, >1% stake, daily loss/profit locks, concurrent contracts, and non-finite broker data.
+- **Not yet live-verified:** repository tests/build, OAuth token authorization against the currently registered Deriv app, live broker proposal/buy/settlement, Upstash integration, and production deployment. The code must pass CI and be exercised on a Deriv virtual account before calling this milestone verified.
+- Real-money trading remains hard-disabled. The $40 target is aspirational and is not a promise of profit. The $20 limit is an entry lock based on returned broker history; it cannot guarantee losses never exceed the limit, especially while a contract remains open or broker data is delayed.
