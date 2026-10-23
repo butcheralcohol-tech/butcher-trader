@@ -9,6 +9,18 @@ import { MARKETS } from "../lib/markets";
 type Side = "LONG" | "SHORT";
 type ManualPosition = { side: Side; entry: number; stake: number; openedAt: number };
 type ClosedTrade = { side: Side; entry: number; exit: number; stake: number; pnl: number; openedAt: number; closedAt: number };
+const BROKER_CONTRACTS = [
+  { value: "CALL", label: "Rise / CALL", unit: "m", barrier: false, limits: false },
+  { value: "PUT", label: "Fall / PUT", unit: "m", barrier: false, limits: false },
+  { value: "DIGITUNDER", label: "Digit Under", unit: "t", barrier: true, limits: false },
+  { value: "DIGITOVER", label: "Digit Over", unit: "t", barrier: true, limits: false },
+  { value: "DIGITMATCH", label: "Digit Matches", unit: "t", barrier: true, limits: false },
+  { value: "DIGITDIFF", label: "Digit Differs", unit: "t", barrier: true, limits: false },
+  { value: "DIGITEVEN", label: "Digit Even", unit: "t", barrier: false, limits: false },
+  { value: "DIGITODD", label: "Digit Odd", unit: "t", barrier: false, limits: false },
+  { value: "MULTUP", label: "Multiplier Up (x10)", unit: "m", barrier: false, limits: true },
+  { value: "MULTDOWN", label: "Multiplier Down (x10)", unit: "m", barrier: false, limits: true },
+] as const;
 
 export default function ManualTrading() {
   const [symbol, setSymbol] = useState<string>("R_100");
@@ -18,10 +30,15 @@ export default function ManualTrading() {
   const [history, setHistory] = useState<ClosedTrade[]>([]);
   const [brokerStake, setBrokerStake] = useState(2);
   const [duration, setDuration] = useState(1);
+  const [contractType, setContractType] = useState<string>("CALL");
+  const [barrier, setBarrier] = useState("6");
+  const [takeProfit, setTakeProfit] = useState("");
+  const [stopLoss, setStopLoss] = useState("");
   const [brokerBusy, setBrokerBusy] = useState(false);
   const [brokerMessage, setBrokerMessage] = useState("Connect a Deriv virtual account before placing demo orders.");
   const [brokerOrders, setBrokerOrders] = useState<Array<Record<string, unknown>>>([]);
   const [brokerAccount, setBrokerAccount] = useState("");
+  const selectedContract = BROKER_CONTRACTS.find(c => c.value === contractType) ?? BROKER_CONTRACTS[0];
   const refreshBrokerOrders = async () => {
     try {
       const response = await fetch("/api/deriv/trades", { credentials: "same-origin", cache: "no-store" });
@@ -34,16 +51,23 @@ export default function ManualTrading() {
       setBrokerMessage(error instanceof Error ? error.message : "Could not load broker history.");
     }
   };
-  const placeBrokerOrder = async (contractType: "CALL" | "PUT") => {
+  const placeBrokerOrder = async () => {
     if (brokerBusy || !Number.isFinite(brokerStake) || brokerStake <= 0) return;
     setBrokerBusy(true);
-    setBrokerMessage("Submitting demo order to Deriv and waiting for broker confirmation…");
+    setBrokerMessage("Submitting demo proposal to Deriv; waiting for broker confirmation…");
     try {
       const idempotencyKey = globalThis.crypto?.randomUUID?.() || `bt_${Date.now()}_${Math.random().toString(36).slice(2)}`;
       const response = await fetch("/api/deriv/trade", {
         method: "POST", credentials: "same-origin",
         headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
-        body: JSON.stringify({ symbol, contractType, duration, durationUnit: "m", stake: brokerStake }),
+        body: JSON.stringify({
+          symbol, contractType, duration, durationUnit: selectedContract.unit, stake,
+          ...(selectedContract.barrier ? { barrier } : {}),
+          ...(selectedContract.limits ? {
+            ...(takeProfit.trim() ? { takeProfit: Number(takeProfit) } : {}),
+            ...(stopLoss.trim() ? { stopLoss: Number(stopLoss) } : {}),
+          } : {}),
+        }),
       });
       const data = await response.json() as { error?: string; reasons?: string[]; contractId?: number; status?: string; account?: string; stake?: number; currency?: string; liveTradingEnabled?: boolean };
       if (!response.ok) throw new Error([data.error, ...(data.reasons || [])].filter(Boolean).join(" "));
@@ -76,15 +100,20 @@ export default function ManualTrading() {
     <div className="section-heading"><div><div className="eyebrow">05 / MANUAL EXECUTION PRACTICE</div><h3>Manual trading desk</h3></div><span className="safe-label"><ShieldCheck size={14} /> VIRTUAL ORDERS ONLY</span></div>
     <section className="panel">
       <div className="card-title"><b>Deriv broker orders</b><span className="card-status">VIRTUAL ACCOUNT ONLY</span></div>
-      <p className="hint">These controls submit a real contract to your authenticated Deriv virtual account. They are separate from the simulated LONG/SHORT practice controls below. Server-side checks enforce demo-account verification, stake risk, daily locks, open-contract limits and duplicate-request protection.</p>
+      <p className="hint">These controls submit contracts only to an authenticated Deriv virtual account. The server validates the account, stake risk, daily locks, open-contract limits and duplicate-request protection. Availability depends on the selected market and Deriv contract rules.</p>
       <div className="fields four">
+        <label>Market<select value={symbol} disabled={brokerBusy} onChange={e => setSymbol(e.target.value)}>{MARKETS.map(m => <option key={m.symbol} value={m.symbol}>{m.name} ({m.symbol})</option>)}</select></label>
+        <label>Contract<select value={contractType} disabled={brokerBusy} onChange={e => setContractType(e.target.value)}>{BROKER_CONTRACTS.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}</select></label>
         <label>Contract stake ($)<input type="number" min="0.01" step="0.01" value={brokerStake} disabled={brokerBusy} onChange={e => setBrokerStake(Number(e.target.value))} /></label>
-        <label>Duration<select value={duration} disabled={brokerBusy} onChange={e => setDuration(Number(e.target.value))}><option value={1}>1 minute</option><option value={2}>2 minutes</option><option value={3}>3 minutes</option><option value={5}>5 minutes</option><option value={10}>10 minutes</option></select></label>
+        <label>Duration ({selectedContract.unit === "t" ? "ticks" : "minutes"})<select value={duration} disabled={brokerBusy} onChange={e => setDuration(Number(e.target.value))}>{(selectedContract.unit === "t" ? [1,2,3,4,5,6,7,8,9,10] : [1,2,3,5,10]).map(n => <option key={n} value={n}>{n} {selectedContract.unit === "t" ? (n === 1 ? "tick" : "ticks") : (n === 1 ? "minute" : "minutes")}</option>)}</select></label>
+        {selectedContract.barrier && <label>Digit prediction (0–9)<input type="number" min="0" max="9" step="1" value={barrier} disabled={brokerBusy} onChange={e => setBarrier(e.target.value)} /></label>}
+        {selectedContract.limits && <label>Take-profit amount ($, optional)<input type="number" min="0.01" step="0.01" value={takeProfit} disabled={brokerBusy} placeholder="No take profit" onChange={e => setTakeProfit(e.target.value)} /></label>}
+        {selectedContract.limits && <label>Stop-loss amount ($, optional)<input type="number" min="0.01" step="0.01" value={stopLoss} disabled={brokerBusy} placeholder="No stop loss" onChange={e => setStopLoss(e.target.value)} /></label>}
       </div>
       <div className="manual-actions">
-        <button className="manual-buy" disabled={brokerBusy || !Number.isFinite(brokerStake) || brokerStake <= 0} onClick={() => placeBrokerOrder("CALL")}>{brokerBusy ? "Submitting…" : "Place Deriv demo CALL"}</button>
-        <button className="manual-sell" disabled={brokerBusy || !Number.isFinite(brokerStake) || brokerStake <= 0} onClick={() => placeBrokerOrder("PUT")}>{brokerBusy ? "Submitting…" : "Place Deriv demo PUT"}</button>
+        <button className="manual-buy" disabled={brokerBusy || !Number.isFinite(brokerStake) || brokerStake <= 0 || (selectedContract.barrier && !/^[0-9]$/.test(barrier)) || (takeProfit !== "" && (!Number.isFinite(Number(takeProfit)) || Number(takeProfit) <= 0)) || (stopLoss !== "" && (!Number.isFinite(Number(stopLoss)) || Number(stopLoss) <= 0))} onClick={placeBrokerOrder}>{brokerBusy ? "Submitting…" : `Place demo ${selectedContract.label} contract`}</button>
       </div>
+      {selectedContract.limits && <p className="hint">Take-profit and stop-loss are sent as broker limit-order parameters. If Deriv rejects them for this contract or market, the order will fail closed; do not assume protection until the broker confirms it.</p>}
       <p className="hint" role="status">{brokerMessage}{brokerAccount ? ` · Account ${brokerAccount}` : ""}</p>
       <div className="btn-row"><button className="ghost-btn" disabled={brokerBusy} onClick={refreshBrokerOrders}>Refresh broker-confirmed history</button></div>
       <div className="table-wrap"><table><thead><tr><th>Contract</th><th>Market</th><th>Stake</th><th>Status</th><th>Broker P&amp;L</th></tr></thead><tbody>
@@ -113,6 +142,6 @@ export default function ManualTrading() {
     <section className="panel"><div className="card-title"><ShieldCheck size={17} /><b>Closed virtual trades</b><span className="card-status">{history.length} RECORDED</span></div>
       <div className="table-wrap"><table><thead><tr><th>Side</th><th>Entry</th><th>Exit</th><th>Stake</th><th>Simulated P&amp;L</th></tr></thead><tbody>{history.map((t, i) => <tr key={t.openedAt + "-" + i}><td><span className={t.side === "LONG" ? "tag filled" : "tag blocked"}>{t.side}</span></td><td>{fmt(t.entry)}</td><td>{fmt(t.exit)}</td><td>{money(t.stake)}</td><td className={t.pnl >= 0 ? "up" : "down"}>{signedMoney(t.pnl)}</td></tr>)}{!history.length && <tr><td colSpan={5}>No closed virtual trades yet.</td></tr>}</tbody></table></div>
     </section>
-    <section className="warning-note"><b>Before using real money</b><p>This panel is deliberately isolated from the broker. Deriv account OAuth, authenticated WebSocket session management, contract proposals, order execution and server-side risk enforcement must be implemented and tested separately before any real order can be sent.</p></section>
+    <section className="warning-note"><b>Real-money trading remains disabled</b><p>Only virtual-account orders are allowed. The contract menu is a limited initial set, not every Deriv contract type. Broker support, proposal acceptance, TP/SL behavior and settlement reconciliation must be verified in demo before expanding coverage.</p></section>
   </div>;
 }
