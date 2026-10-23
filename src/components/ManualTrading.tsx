@@ -8,7 +8,8 @@ import { MARKETS } from "../lib/markets";
 
 type Side = "LONG" | "SHORT";
 type ManualPosition = { side: Side; entry: number; stake: number; openedAt: number };
-type ClosedTrade = { side: Side; entry: number; exit: number; stake: number; pnl: number; openedAt: number; closedAt: number };\ntype DiscoveredContract = { contractType: string; label: string; category: string; minDuration: unknown; maxDuration: unknown; barriers?: unknown; expiryType?: unknown };
+type ClosedTrade = { side: Side; entry: number; exit: number; stake: number; pnl: number; openedAt: number; closedAt: number };
+type DiscoveredContract = { contractType: string; label: string; category: string; minDuration: unknown; maxDuration: unknown; barriers?: unknown; expiryType?: unknown };
 const BROKER_CONTRACTS = [
   { value: "CALL", label: "Rise / CALL", unit: "m", barrier: false, limits: false },
   { value: "PUT", label: "Fall / PUT", unit: "m", barrier: false, limits: false },
@@ -38,7 +39,9 @@ export default function ManualTrading() {
   const [brokerMessage, setBrokerMessage] = useState("Connect a Deriv virtual account before placing demo orders.");
   const [brokerOrders, setBrokerOrders] = useState<Array<Record<string, unknown>>>([]);
   const [brokerAccount, setBrokerAccount] = useState("");
-  const [discoveredContracts, setDiscoveredContracts] = useState<DiscoveredContract[]>([]);\n  const [durationUnit, setDurationUnit] = useState("m");\n  const [barrier2, setBarrier2] = useState("");
+  const [discoveredContracts, setDiscoveredContracts] = useState<DiscoveredContract[]>([]);
+  const [durationUnit, setDurationUnit] = useState("m");
+  const [barrier2, setBarrier2] = useState("");
   const [discoveryMessage, setDiscoveryMessage] = useState("Connect Deriv to load market-specific contract availability.");
   useEffect(() => {
     let active = true;
