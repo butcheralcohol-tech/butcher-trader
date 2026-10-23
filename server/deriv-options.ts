@@ -48,7 +48,7 @@ export class DerivOptionsClient {
     if (!accessToken || accessToken.length > 4096) throw new Error("A valid server-side Deriv access token is required.");
     // This worker foundation deliberately permits demo accounts only. Real account execution
     // must not be reachable through an accidental environment-variable change.
-    if (!isDemoOptionsAccountId(accountId)) throw new Error("Only DOT-prefixed Deriv Options demo accounts are enabled in this worker.");
+    if (!isDemoOptionsAccountId(accountId)) throw new Error("Only Deriv virtual trading accounts are enabled in this worker.");
     const fetchImpl = input.fetchImpl ?? fetch;
     const headers: Record<string, string> = { Authorization: `Bearer ${accessToken}`, Accept: "application/json" };
     // OAuth access tokens do not need Deriv-App-ID; PATs do.
