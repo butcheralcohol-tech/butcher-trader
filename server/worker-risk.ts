@@ -38,7 +38,7 @@ export function checkWorkerRisk(input: {
     config.minimumStake, config.maxStakePercent, config.maximumOpenContracts,
     state.marketNetPnl[market] ?? 0, config.marketLossLimitUsd[market]];
   if (!values.every(Number.isFinite)) reasons.push("Risk state or market limit is missing/non-finite.");
-  if (!/^VRTC\\d+$/.test(state.accountId)) reasons.push("Only a verified Deriv virtual account is allowed.");
+  if (!/^VRTC\d+$/.test(state.accountId)) reasons.push("Only a verified Deriv virtual account is allowed.");
   if (!/^[A-Z]{3,5}$/.test(state.currency)) reasons.push("Account currency is invalid.");
   if (state.halted) reasons.push("Worker is halted; operator reset and reconciliation are required.");
   if (brokerBalance <= 0) reasons.push("Broker balance is not positive.");
