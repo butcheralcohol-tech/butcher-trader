@@ -88,3 +88,12 @@ Research starter, not financial advice or a profitable-strategy claim. Risk limi
 - Test coverage added for the pure demo execution risk gate: non-demo accounts, >1% stake, daily loss/profit locks, concurrent contracts, and non-finite broker data.
 - **Not yet live-verified:** repository tests/build, OAuth token authorization against the currently registered Deriv app, live broker proposal/buy/settlement, Upstash integration, and production deployment. The code must pass CI and be exercised on a Deriv virtual account before calling this milestone verified.
 - Real-money trading remains hard-disabled. The $40 target is aspirational and is not a promise of profit. The $20 limit is an entry lock based on returned broker history; it cannot guarantee losses never exceed the limit, especially while a contract remains open or broker data is delayed.
+
+
+## Persistent demo worker (Railway)
+
+A separate long-running Railway process is defined by `railway.json` and starts with `npm run worker`. Configure these as Railway service variables (never VITE variables): `WORKER_MODE=demo`, `WORKER_ENABLE_ORDERS=false`, `DERIV_DEMO_ACCOUNT_ID=VRTC…` for the selected virtual account, `DERIV_ACCESS_TOKEN` as a server-side secret, `DERIV_APP_ID` if required, and `UPSTASH_REDIS_REST_URL` plus `UPSTASH_REDIS_REST_TOKEN` for durable heartbeat storage.
+
+The worker uses Deriv's Options OTP endpoint to connect to the demo Options WebSocket and writes a 60-second-expiring heartbeat to Upstash every 15 seconds. It refuses wallet/real account IDs and stops if required configuration or durable storage is missing. **This first persistent-worker milestone does not submit orders.** The Options API proposal/buy response contract, broker-confirmed settlement reconciliation, atomic cumulative hard stop, and end-to-end demo order tests must be implemented and verified before any order loop is enabled. Keep `WORKER_ENABLE_ORDERS=false`; real-money execution remains disabled.
+
+Checks: `npm ci && npm run check && npm run build`. Adding `railway.json` does not create or start a Railway service; that service must be created and configured in Railway.
