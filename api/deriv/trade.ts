@@ -139,6 +139,25 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       const profit = numberField(transaction.profit);
       return sellTime !== null && sellTime >= today && profit !== null ? sum + profit : sum;
     }, 0);
+    // Market loss accounting is based only on broker-reported closed trades with a matching underlying.
+    const marketTransactions = transactions.filter(transaction =>
+      String(transaction.underlying ?? transaction.symbol ?? "") === symbol
+    );
+    if (marketTransactions.some(transaction => numberField(transaction.sell_time) === null || numberField(transaction.profit) === null)) {
+      throw new Error("Market-specific broker history is incomplete; demo orders are disabled.");
+    }
+    const marketNetPnl = marketTransactions.reduce((sum, transaction) => {
+      const sellTime = numberField(transaction.sell_time);
+      const profit = numberField(transaction.profit);
+      return sellTime !== null && sellTime >= today && profit !== null ? sum + profit : sum;
+    }, 0);
+    // Define a session as a rolling four-hour window; this is separate from the UTC daily total.
+    const sessionStart = Math.floor(Date.now() / 1000) - 4 * 60 * 60;
+    const sessionNetPnl = transactions.reduce((sum, transaction) => {
+      const sellTime = numberField(transaction.sell_time);
+      const profit = numberField(transaction.profit);
+      return sellTime !== null && sellTime >= sessionStart && profit !== null ? sum + profit : sum;
+    }, 0);
     const configuredLoss = Number(process.env.DERIV_DAILY_LOSS_LIMIT_USD ?? 20);
     const configuredTarget = Number(process.env.DERIV_DAILY_PROFIT_TARGET_USD ?? 40);
     const configuredMarketLimits = (() => {
@@ -152,7 +171,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       }
     })();
     const configuredSessionLoss = Number(process.env.DERIV_SESSION_LOSS_LIMIT_USD ?? configuredLoss);
-    const risk = evaluateDemoExecutionRisk({ account, stake, dailyNetPnl,
+    const risk = evaluateDemoExecutionRisk({ account, stake, dailyNetPnl, marketNetPnl, sessionNetPnl,
       dailyLossLimitUsd: configuredLoss, marketLossLimitUsd: configuredMarketLimits,
       sessionLossLimitUsd: configuredSessionLoss, dailyProfitTargetUsd: configuredTarget,
       riskPercent: 1, openContracts, maxOpenContracts: 1 });
