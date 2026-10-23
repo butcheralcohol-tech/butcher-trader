@@ -18,6 +18,8 @@ export type ExecutionRiskInput = {
   account: DemoAccount;
   stake: number;
   dailyNetPnl: number;
+  marketNetPnl?: number;
+  sessionNetPnl?: number;
   dailyLossLimitUsd: number;
   dailyProfitTargetUsd: number;
   riskPercent: number;
@@ -37,7 +39,9 @@ export function evaluateDemoExecutionRisk(input: ExecutionRiskInput): ExecutionR
   const reasons: string[] = [];
   const marketLossLimitUsd = input.marketLossLimitUsd ?? input.dailyLossLimitUsd;
   const sessionLossLimitUsd = input.sessionLossLimitUsd ?? input.dailyLossLimitUsd;
-  const numeric = [input.account.balance, input.stake, input.dailyNetPnl, input.dailyLossLimitUsd,
+  const marketNetPnl = input.marketNetPnl ?? input.dailyNetPnl;
+  const sessionNetPnl = input.sessionNetPnl ?? input.dailyNetPnl;
+  const numeric = [input.account.balance, input.stake, input.dailyNetPnl, marketNetPnl, sessionNetPnl, input.dailyLossLimitUsd,
     input.dailyProfitTargetUsd, input.riskPercent, input.openContracts, input.maxOpenContracts,
     marketLossLimitUsd, sessionLossLimitUsd];
   if (!numeric.every(Number.isFinite)) reasons.push("Risk inputs must be finite.");
@@ -54,7 +58,8 @@ export function evaluateDemoExecutionRisk(input: ExecutionRiskInput): ExecutionR
   ] as const;
   for (const [label, limit] of limits) {
     if (limit <= 0 || limit > 20) reasons.push(`${label} loss cap must be positive and no greater than $20.`);
-    if (input.dailyNetPnl <= -limit) reasons.push(`Broker-confirmed ${label.toLowerCase()} loss cap reached; entries are locked.`);
+    const pnl = label === "Daily" ? input.dailyNetPnl : label === "Per-market" ? marketNetPnl : sessionNetPnl;
+    if (pnl <= -limit) reasons.push(`Broker-confirmed ${label.toLowerCase()} loss cap reached; entries are locked.`);
   }
   if (input.dailyProfitTargetUsd < 24 || input.dailyProfitTargetUsd > 10000) {
     reasons.push("Daily profit target must be between $24 and $10,000; it is aspirational, not guaranteed.");
