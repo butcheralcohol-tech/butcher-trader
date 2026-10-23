@@ -142,6 +142,10 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     const profits = authReplies[3] as unknown as { profit_table?: { transactions?: Array<Record<string, unknown>> } };
     const transactions = profits.profit_table?.transactions;
     if (!Array.isArray(transactions)) throw new Error("Broker profit history is unavailable; fail closed.");
+    if (transactions.length >= 500) throw new Error("Broker history reached the query limit; risk totals may be incomplete, so demo orders are disabled.");
+    if (transactions.some(transaction => numberField(transaction.sell_time) === null || numberField(transaction.profit) === null || typeof (transaction.underlying ?? transaction.symbol) !== "string")) {
+      throw new Error("Broker history is missing timestamps, P&L, or market identifiers; risk accounting is incomplete, so demo orders are disabled.");
+    }
     const today = todayStartUnix();
     const dailyNetPnl = transactions.reduce((sum, transaction) => {
       const sellTime = numberField(transaction.sell_time);
