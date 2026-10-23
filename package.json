@@ -9,6 +9,7 @@
     "dev:server": "tsx watch server/index.ts",
     "build": "tsc --noEmit && vite build",
     "start": "tsx server/index.ts",
+    "worker": "tsx server/worker.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test shared/*.test.ts server/*.test.ts",
     "check": "npm test && npm run typecheck"
@@ -35,7 +36,5 @@
     "vite": "^6.0.7",
     "@vitejs/plugin-react": "^4.3.4"
   },
-  "engines": {
-    "node": ">=20"
-  }
+  "engines": { "node": ">=20" }
 }
