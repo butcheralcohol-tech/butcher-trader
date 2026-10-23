@@ -34,7 +34,7 @@ test("blocks missing market-specific limits and unknown risk state", () => {
 test("blocks after target, when halted, or when any contract is open", () => {
   assert.equal(check({ state: { ...state, realizedNetPnl: 40 } }).allowed, false);
   assert.equal(check({ state: { ...state, halted: true } }).allowed, false);
-  assert.equal(check({ brokerOpenContractIds: [123] }).allowed, false);
+  assert.equal(check({ brokerOpenContractIds: ["123"] }).allowed, false);
 });
 test("applies minimum stake and 1% max stake even with small balances", () => {
   assert.equal(check({ stake: 1 }).allowed, false);
