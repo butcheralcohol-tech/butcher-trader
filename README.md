@@ -88,3 +88,14 @@ Research starter, not financial advice or a profitable-strategy claim. Risk limi
 - Test coverage added for the pure demo execution risk gate: non-demo accounts, >1% stake, daily loss/profit locks, concurrent contracts, and non-finite broker data.
 - **Not yet live-verified:** repository tests/build, OAuth token authorization against the currently registered Deriv app, live broker proposal/buy/settlement, Upstash integration, and production deployment. The code must pass CI and be exercised on a Deriv virtual account before calling this milestone verified.
 - Real-money trading remains hard-disabled. The $40 target is aspirational and is not a promise of profit. The $20 limit is an entry lock based on returned broker history; it cannot guarantee losses never exceed the limit, especially while a contract remains open or broker data is delayed.
+
+## Real-money trading (locked by default)
+Demo accounts work out of the box. A real Deriv account is refused unless **every** one of these holds:
+1. Server env `ALLOW_REAL_TRADING=I_ACCEPT_REAL_MONEY_LOSSES` (exact value; `true` does not work).
+2. The broker-verified login ID is in `REAL_ACCOUNT_ALLOWLIST`.
+3. `REAL_MAX_STAKE` and `REAL_DAILY_LOSS_LIMIT` are set (no defaults). Effective stake is also capped at 1% of balance and the daily loss at 3% of balance, using Deriv's own balance and profit history.
+4. At least 30 demo orders (`REAL_MIN_DEMO_ORDERS`, cannot be lower) have been broker-confirmed by this server.
+5. The dashboard request carries the typed phrase `TRADE REAL MONEY`.
+6. No open contract exists, and the per-account lock is held while all checks run.
+
+`TRADING_HALTED=true` plus a redeploy stops every order, demo and real. Not yet verified against live Deriv: run on a demo account for weeks first; passing these gates is not a profit guarantee or a loss guarantee.

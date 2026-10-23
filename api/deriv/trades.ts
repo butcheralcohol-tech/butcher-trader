@@ -76,10 +76,13 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
   try {
     const snapshot = await brokerSnapshot(session.accessToken);
     const accountId = String(snapshot.account.loginid ?? "");
-    if (snapshot.account.is_virtual !== 1 || !/^VRTC\d+$/.test(accountId)) {
-      sendJson(res, 403, { error: "Only a broker-verified Deriv virtual account can use this endpoint." }); return;
+    const demoAccount = snapshot.account.is_virtual === 1 && /^VRTC\d+$/.test(accountId);
+    const realAccount = snapshot.account.is_virtual === 0 && /^(CR|MF|MLT|MX)\d+$/.test(accountId);
+    if (!demoAccount && !realAccount) {
+      sendJson(res, 403, { error: "This account type is not recognised." }); return;
     }
-    const prefix = "butcher:demo:" + accountId + ":contract:";
+    const accountMode = demoAccount ? "demo" : "real";
+    const prefix = "butcher:" + accountMode + ":" + accountId + ":contract:";
     // SCAN returns pages; follow the cursor (bounded) so older orders are not silently dropped from reconciliation.
     const keys: string[] = [];
     let cursor = "0";
@@ -113,8 +116,8 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       return { ...order, status: "unreconciled", brokerConfirmed: false,
         note: "No matching open contract or closed broker transaction was returned. Do not retry the order automatically." };
     });
-    sendJson(res, 200, { account: accountId, accountMode: "demo", trades,
-      brokerHistoryCheckedAt: new Date().toISOString(), liveTradingEnabled: false });
+    sendJson(res, 200, { account: accountId, accountMode, trades,
+      brokerHistoryCheckedAt: new Date().toISOString(), liveTradingEnabled: realAccount });
   } catch (error) {
     sendJson(res, 503, { error: error instanceof Error ? error.message : "Broker history reconciliation failed.",
       brokerConfirmed: false, liveTradingEnabled: false });
