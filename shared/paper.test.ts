@@ -25,9 +25,22 @@ test("ensemble combines majority signals and rejects conflicting votes", () => {
   assert.equal(combined?.side, "LONG");
   assert.equal(combined?.stop, 95.5);
   assert.equal(combined?.target, 111);
-  assert.ok(combined?.reason.includes("2/3 vote(s)"));
+  assert.ok(combined?.reason.includes("Weighted ensemble"));
+  assert.ok(combined?.reason.includes("2.00/3.00 weight"));
   assert.equal(combineStrategySignals(votes.slice(0, 2), 3, 75), null);
   assert.equal(combineStrategySignals([], 3, 60), null);
+});
+
+test("weighted ensemble lets configured strategy weights affect the direction", () => {
+  const votes = [
+    { name: "High-weight trend", weight: 3, signal: { side: "LONG" as const, stop: 95, target: 110, reason: "trend" } },
+    { name: "Reversion", weight: 1, signal: { side: "SHORT" as const, stop: 105, target: 90, reason: "reversion" } },
+    { name: "Breakout", weight: 1, signal: { side: "SHORT" as const, stop: 104, target: 91, reason: "breakdown" } },
+  ];
+  const result = combineStrategySignals(votes, 3, 60, [3, 1, 1]);
+  assert.equal(result?.side, "LONG");
+  assert.ok(result?.reason.includes("3.00/5.00 weight"));
+  assert.equal(combineStrategySignals(votes, 3, 75, [3, 1, 1]), null);
 });
 
 test("multi-strategy session records enabled modules and consensus settings", () => {
