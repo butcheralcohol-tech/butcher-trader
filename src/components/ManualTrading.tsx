@@ -17,6 +17,7 @@ export default function ManualTrading() {
   const [position, setPosition] = useState<ManualPosition | null>(null);
   const [history, setHistory] = useState<ClosedTrade[]>([]);
   const [brokerStake, setBrokerStake] = useState(2);
+  const [realPhrase, setRealPhrase] = useState("");
   const [duration, setDuration] = useState(1);
   const [brokerBusy, setBrokerBusy] = useState(false);
   const [brokerMessage, setBrokerMessage] = useState("Connect a Deriv virtual account before placing demo orders.");
@@ -43,7 +44,7 @@ export default function ManualTrading() {
       const response = await fetch("/api/deriv/trade", {
         method: "POST", credentials: "same-origin",
         headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
-        body: JSON.stringify({ symbol, contractType, duration, durationUnit: "m", stake: brokerStake }),
+        body: JSON.stringify({ symbol, contractType, duration, durationUnit: "m", stake: brokerStake, ...(realPhrase ? { realMoneyConfirmation: realPhrase } : {}) }),
       });
       const data = await response.json() as { error?: string; reasons?: string[]; contractId?: number; status?: string; account?: string; stake?: number; currency?: string; liveTradingEnabled?: boolean };
       if (!response.ok) throw new Error([data.error, ...(data.reasons || [])].filter(Boolean).join(" "));
@@ -79,6 +80,7 @@ export default function ManualTrading() {
       <p className="hint">These controls submit a real contract to your authenticated Deriv virtual account. They are separate from the simulated LONG/SHORT practice controls below. Server-side checks enforce demo-account verification, stake risk, daily locks, open-contract limits and duplicate-request protection.</p>
       <div className="fields four">
         <label>Contract stake ($)<input type="number" min="0.01" step="0.01" value={brokerStake} disabled={brokerBusy} onChange={e => setBrokerStake(Number(e.target.value))} /></label>
+        <label>Real-money confirmation (empty for demo)<input type="text" autoComplete="off" placeholder="TRADE REAL MONEY" value={realPhrase} disabled={brokerBusy} onChange={e => setRealPhrase(e.target.value)} /></label>
         <label>Duration<select value={duration} disabled={brokerBusy} onChange={e => setDuration(Number(e.target.value))}><option value={1}>1 minute</option><option value={2}>2 minutes</option><option value={3}>3 minutes</option><option value={5}>5 minutes</option><option value={10}>10 minutes</option></select></label>
       </div>
       <div className="manual-actions">

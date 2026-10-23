@@ -27,6 +27,7 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
   const [manualRewardRisk, setManualRewardRisk] = useState(2);
   const [brokerExecution, setBrokerExecution] = useState(false);
   const [brokerStake, setBrokerStake] = useState(2);
+  const [realPhrase, setRealPhrase] = useState(""); // typed fresh each visit on purpose; only matters for real accounts
   const [brokerExecutionMessage, setBrokerExecutionMessage] = useState("Off — robot trades are paper-only until demo execution is explicitly enabled.");
   // Candle time of the newest paper fill already handled. Only fills after this are mirrored, so arming never replays history.
   const handledUpTo = useRef(0);
@@ -48,7 +49,7 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
             const response = await fetch("/api/deriv/trade", {
               method: "POST", credentials: "same-origin",
               headers: { "Content-Type": "application/json", "Idempotency-Key": order.idempotencyKey },
-              body: JSON.stringify({ symbol, contractType: order.contractType, duration: 1, durationUnit: "m", stake: brokerStake }),
+              body: JSON.stringify({ symbol, contractType: order.contractType, duration: 1, durationUnit: "m", stake: brokerStake, ...(realPhrase ? { realMoneyConfirmation: realPhrase } : {}) }),
             });
             const data = await response.json() as { error?: string; reasons?: string[]; contractId?: number; status?: string; stake?: number; currency?: string; noRetryUntilReconciled?: boolean };
             if (!response.ok) throw new Error([data.error, ...(data.reasons || [])].filter(Boolean).join(" ") + (data.noRetryUntilReconciled ? " Check broker history before trusting this order." : ""));
@@ -59,7 +60,7 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
         }
       } finally { sending.current = false; }
     })();
-  }, [session?.state.events, session?.meta.startedAt, session?.meta.symbol, brokerExecution, brokerStake]);
+  }, [session?.state.events, session?.meta.startedAt, session?.meta.symbol, brokerExecution, brokerStake, realPhrase]);
 
   const begin = () => {
     if (!strategyIds.length || !Number.isFinite(balance) || balance < TRADING_POLICY.minimumStartingBalanceUsd || !Number.isFinite(sessionLossCap) || sessionLossCap <= 0 || !Number.isFinite(tradeProfitTarget) || tradeProfitTarget <= 0 || !Number.isFinite(sessionProfitTarget) || sessionProfitTarget <= 0) return;
@@ -127,10 +128,11 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
       </section>
       <p className="hint">Enabled modules: {activeStrategies.join(" · ")}. {meta.consensusPercent ?? 60}% consensus required. {info.message}{info.lastDataAt ? ` Last data ${clockSeconds(info.lastDataAt)}.` : " "}The bot only runs while this page is open; session state is stored in this browser. All trades remain simulated.</p>
       <section className="panel manual-trading">
-        <div className="card-title"><b>Deriv demo robot execution</b><span className="card-status">DEMO ONLY · LIVE DISABLED</span></div>
-        <p className="hint">When enabled, each newly risk-approved paper-bot entry signal is mirrored as a Deriv virtual CALL/PUT contract. Broker-side risk checks still decide whether the order is allowed. This does not mirror paper exits; check broker-confirmed history for settlement. Never enable this unless you are connected to a Deriv virtual account.</p>
+        <div className="card-title"><b>Deriv demo robot execution</b><span className="card-status">DEMO BY DEFAULT · REAL LOCKED</span></div>
+        <p className="hint">When enabled, each newly risk-approved paper-bot entry signal is mirrored as a Deriv virtual CALL/PUT contract. Broker-side risk checks still decide whether the order is allowed. This does not mirror paper exits; check broker-confirmed history for settlement. Real-money orders are refused unless the server owner has enabled them for your exact account, you have typed the confirmation phrase here, and enough demo orders have been confirmed. Start on a virtual account.</p>
         <div className="fields four">
           <label>Broker demo stake ($)<input type="number" min="0.01" step="0.01" value={brokerStake} disabled={brokerExecution} onChange={e => setBrokerStake(Number(e.target.value))} /></label>
+          <label>Real-money confirmation (leave empty for demo)<input type="text" autoComplete="off" placeholder="TRADE REAL MONEY" value={realPhrase} onChange={e => setRealPhrase(e.target.value)} /></label>
           <label className="bot-mode"><input type="checkbox" checked={brokerExecution} onChange={e => { if (e.target.checked) handledUpTo.current = latestEventTime(session?.state.events ?? []); setBrokerExecution(e.target.checked); setBrokerExecutionMessage(e.target.checked ? "Armed for new paper-bot fills. Existing signals will not be replayed." : "Off — no new robot orders will be sent."); }} /> Enable broker demo orders</label>
         </div>
         <p className="hint" role="status">{brokerExecutionMessage}</p>

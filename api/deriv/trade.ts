@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
 import { OAUTH_COOKIE, decryptSession, parseCookies } from "../../shared/oauth-session.js";
 import { evaluateDemoExecutionRisk, type DemoAccount } from "../../shared/demo-execution.js";
+import { evaluateRealExecutionRisk, isHalted, loadRealConfig, type RealConfig } from "../../shared/real-gate.js";
 
 type DerivReply = { req_id?: number; error?: { code?: string; message?: string }; authorize?: Record<string, unknown>; balance?: Record<string, unknown>;
   proposal?: { id?: string; ask_price?: number; payout?: number; longcode?: string };
@@ -71,10 +72,13 @@ async function brokerRequest(token: string, payloads: Record<string, unknown>[])
     return replies;
   } finally { try { ws.close(); } catch { /* best effort */ } }
 }
+/** Count of broker-confirmed demo orders, required (>= 30) before any real-money order is accepted. */
+const DEMO_COUNTER_KEY = "butcher:demo-confirmed-orders";
 function todayStartUnix(): number { const d = new Date(); d.setUTCHours(0, 0, 0, 0); return Math.floor(d.getTime() / 1000); }
 function numberField(value: unknown): number | null { return typeof value === "number" && Number.isFinite(value) ? value : null; }
 export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (req.method !== "POST") { res.setHeader("Allow", "POST"); json(res, 405, { error: "Method not allowed." }); return; }
+  if (isHalted(process.env)) { json(res, 423, { error: "Trading is halted by the server kill switch (TRADING_HALTED).", liveTradingEnabled: false }); return; }
   const secret = process.env.SESSION_SECRET ?? "";
   const cookies = parseCookies(typeof req.headers.cookie === "string" ? req.headers.cookie : null);
   const session = decryptSession(cookies[OAUTH_COOKIE], secret);
@@ -110,10 +114,19 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     const identity = (await brokerRequest(session.accessToken, []))[0].authorize;
     if (!identity) throw new Error("No broker authorization response.");
     const loginid = String(identity.loginid ?? "");
-    if (identity.is_virtual !== 1 || !/^VRTC\d+$/.test(loginid)) {
-      json(res, 403, { error: "This endpoint only permits broker-verified Deriv virtual accounts." }); return;
+    const demoAccount = identity.is_virtual === 1 && /^VRTC\d+$/.test(loginid);
+    const realAccount = identity.is_virtual === 0 && /^(CR|MF|MLT|MX)\d+$/.test(loginid);
+    if (!demoAccount && !realAccount) { json(res, 403, { error: "This account type is not recognised; no order was sent." }); return; }
+    const mode = demoAccount ? "demo" : "real";
+    let realConfig: RealConfig | null = null;
+    if (realAccount) {
+      // Real money: refuse early and loudly unless the server owner has deliberately enabled it for this exact account.
+      const loaded = loadRealConfig(process.env);
+      if (!loaded.ok) { json(res, 403, { error: "Real-money trading is disabled.", reasons: loaded.reasons, liveTradingEnabled: false }); return; }
+      if (!loaded.config.allowlist.includes(loginid)) { json(res, 403, { error: "This real account is not on the allowlist.", liveTradingEnabled: false }); return; }
+      realConfig = loaded.config;
     }
-    const storagePrefix = `butcher:demo:${loginid}`;
+    const storagePrefix = `butcher:${mode}:${loginid}`;
     const idempotencyKey = storagePrefix + ":idempotency:" + requestId;
     const previous = await redisCommand<string>(["GET", idempotencyKey]);
     if (previous) { json(res, 409, { ...JSON.parse(previous), replayed: true, message: "This request key was already used; reconcile broker history before retrying." }); return; }
@@ -126,7 +139,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     const authReplies = await brokerRequest(session.accessToken, [{ balance: 1 }, { portfolio: 1 }, { profit_table: 1, description: 1, limit: 500, offset: 0, sort: "DESC" }]);
     const auth = authReplies[0].authorize;
     if (!auth || String(auth.loginid ?? "") !== loginid) throw new Error("Broker account changed during the request; no order was sent.");
-    let account: DemoAccount = { loginid, is_virtual: 1, currency: String(auth.currency ?? ""), balance: numberField(auth.balance) ?? 0 };
+    let account: DemoAccount = { loginid, is_virtual: demoAccount ? 1 : 0, currency: String(auth.currency ?? ""), balance: numberField(auth.balance) ?? 0 };
     const balanceReply = authReplies[1].balance as Record<string, unknown> | undefined;
     const brokerBalance = numberField(balanceReply?.balance);
     const currency = typeof balanceReply?.currency === "string" ? balanceReply.currency : account.currency;
@@ -144,8 +157,14 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       const profit = numberField(transaction.profit);
       return sellTime !== null && sellTime >= today && profit !== null ? sum + profit : sum;
     }, 0);
-    const risk = evaluateDemoExecutionRisk({ account, stake, dailyNetPnl, dailyLossLimitUsd: 20,
-      dailyProfitTargetUsd: 40, riskPercent: 1, openContracts, maxOpenContracts: 1 });
+    let risk;
+    if (realConfig) {
+      const demoOrdersConfirmed = Number(await redisCommand<string>(["GET", DEMO_COUNTER_KEY]) ?? 0);
+      risk = evaluateRealExecutionRisk({ account, stake, dailyNetPnl, openContracts, maxOpenContracts: 1, config: realConfig,
+        confirmation: body.realMoneyConfirmation, demoOrdersConfirmed });
+    } else {
+      risk = evaluateDemoExecutionRisk({ account, stake, dailyNetPnl, dailyLossLimitUsd: 20, dailyProfitTargetUsd: 40, riskPercent: 1, openContracts, maxOpenContracts: 1 });
+    }
     if (!risk.allowed) { json(res, 423, { error: "Risk checks blocked this order.", reasons: risk.reasons, maxStake: risk.maxStake, dailyNetPnl }); return; }
 
     // 3) Reserve the idempotency key, price, buy.
@@ -160,12 +179,13 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     const buy = await brokerRequest(session.accessToken, [{ buy: String(proposalData.id), price: stake }]);
     const receipt = buy[1]?.buy;
     if (!receipt?.contract_id || numberField(receipt.buy_price) === null) throw new Error("Broker buy receipt was not confirmed. Reconcile account history before retrying.");
-    const result = { status: "open", mode: "demo", account: account.loginid, contractId: receipt.contract_id,
+    const result = { status: "open", mode, account: account.loginid, contractId: receipt.contract_id,
       transactionId: receipt.transaction_id ?? null, symbol, contractType, stake: receipt.buy_price, currency: account.currency,
       proposalPayout: proposalData.payout ?? null, dailyNetPnlAtEntry: dailyNetPnl, submittedAt: new Date().toISOString(),
-      brokerConfirmed: true, liveTradingEnabled: false };
+      brokerConfirmed: true, liveTradingEnabled: realAccount };
     await redisCommand(["SET", idempotencyKey, JSON.stringify(result), "EX", 86400]);
     await redisCommand(["SET", `${storagePrefix}:contract:${receipt.contract_id}`, JSON.stringify(result), "EX", 604800]);
+    if (demoAccount) await redisCommand(["INCR", DEMO_COUNTER_KEY]).catch(() => null); // evidence for the real-money gate
     json(res, 201, result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Demo execution failed closed.";
