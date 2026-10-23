@@ -21,7 +21,7 @@ async function main(): Promise<void> {
   const accessToken = env("DERIV_ACCESS_TOKEN");
   const redisUrl = env("UPSTASH_REDIS_REST_URL");
   const redisToken = env("UPSTASH_REDIS_REST_TOKEN");
-  if (!/^VRTC\\d+$/.test(accountId)) throw new Error("DERIV_DEMO_ACCOUNT_ID must be a selected Deriv VRTC demo account.");
+  if (!/^VRTC\d+$/.test(accountId)) throw new Error("DERIV_DEMO_ACCOUNT_ID must be a selected Deriv VRTC demo account.");
   if (!accessToken) throw new Error("DERIV_ACCESS_TOKEN is missing; no browser/client token fallback is allowed.");
   if (!redisUrl || !redisToken) throw new Error("Durable Upstash storage is required; worker stopped.");
   const appId = env("DERIV_APP_ID");
@@ -35,7 +35,7 @@ async function main(): Promise<void> {
     console.log(JSON.stringify({ event: "demo_options_session_connected", accountId, ordersEnabled: false, liveTradingEnabled: false }));
     // Stay resident and report liveness. No orders are submitted by this scaffold.
     while (!stopping) {
-      const response = await fetch(redisUrl.replace(/\\/$/, ""), {
+      const response = await fetch(redisUrl.replace(/\/$/, ""), {
         method: "POST",
         headers: { Authorization: `Bearer ${redisToken}`, "Content-Type": "application/json" },
         body: JSON.stringify(["SET", `butcher:worker:${accountId}:heartbeat`, JSON.stringify({ at: new Date().toISOString(), mode: "demo", ordersEnabled: false }), "EX", 60]),
