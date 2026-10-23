@@ -139,8 +139,23 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       const profit = numberField(transaction.profit);
       return sellTime !== null && sellTime >= today && profit !== null ? sum + profit : sum;
     }, 0);
-    const risk = evaluateDemoExecutionRisk({ account, stake, dailyNetPnl, dailyLossLimitUsd: 20,
-      dailyProfitTargetUsd: 40, riskPercent: 1, openContracts, maxOpenContracts: 1 });
+    const configuredLoss = Number(process.env.DERIV_DAILY_LOSS_LIMIT_USD ?? 20);
+    const configuredTarget = Number(process.env.DERIV_DAILY_PROFIT_TARGET_USD ?? 40);
+    const configuredMarketLimits = (() => {
+      try {
+        const raw = process.env.DERIV_MARKET_LOSS_LIMITS_JSON;
+        const parsed = raw ? JSON.parse(raw) as Record<string, unknown> : {};
+        const value = parsed[symbol];
+        return typeof value === "number" && Number.isFinite(value) ? value : configuredLoss;
+      } catch {
+        throw new Error("DERIV_MARKET_LOSS_LIMITS_JSON is invalid; demo orders are disabled.");
+      }
+    })();
+    const configuredSessionLoss = Number(process.env.DERIV_SESSION_LOSS_LIMIT_USD ?? configuredLoss);
+    const risk = evaluateDemoExecutionRisk({ account, stake, dailyNetPnl,
+      dailyLossLimitUsd: configuredLoss, marketLossLimitUsd: configuredMarketLimits,
+      sessionLossLimitUsd: configuredSessionLoss, dailyProfitTargetUsd: configuredTarget,
+      riskPercent: 1, openContracts, maxOpenContracts: 1 });
     if (!risk.allowed) { json(res, 423, { error: "Risk checks blocked this order.", reasons: risk.reasons, maxStake: risk.maxStake, dailyNetPnl }); return; }
     const storagePrefix = `butcher:demo:${account.loginid}`;
     const idempotencyKey = storagePrefix + ":idempotency:" + requestId;
