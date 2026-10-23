@@ -57,7 +57,7 @@ export function liveExecutionBlockers(checks: Partial<LiveExecutionReadiness> | 
   if (checks.explicitApproval !== true) blockers.push("explicit live-trading approval is missing");
   if (checks.safetyReviewPassed !== true) blockers.push("safety review has not passed");
   // This final invariant intentionally prevents this helper from ever enabling live orders.
-  if (TRADING_POLICY.liveTradingEnabled !== true) blockers.push("live execution is disabled by the release policy");
+  blockers.push("live execution is disabled by the release policy");
   return blockers;
 }
 
