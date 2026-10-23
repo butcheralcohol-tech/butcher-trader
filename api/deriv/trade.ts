@@ -93,14 +93,25 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     try { body = JSON.parse(raw || "{}") as Record<string, unknown>; } catch { json(res, 400, { error: "Invalid JSON." }); return; }
   }
   const symbol = typeof body.symbol === "string" ? body.symbol : "";
-  const contractType = body.contractType;
+  const contractType = typeof body.contractType === "string" ? body.contractType : "";
   const duration = body.duration;
   const durationUnit = body.durationUnit;
   const stake = numberField(body.stake);
-  if (!/^[A-Z0-9_]{2,32}$/.test(symbol) || !["CALL", "PUT"].includes(String(contractType)) ||
-      !Number.isInteger(duration) || Number(duration) < 1 || Number(duration) > 10 ||
-      durationUnit !== "m" || stake === null || stake <= 0) {
-    json(res, 400, { error: "Invalid order. Use a valid symbol, CALL/PUT, 1–10 minutes, and a positive stake." }); return;
+  const barrier = body.barrier;
+  const takeProfit = numberField(body.takeProfit);
+  const stopLoss = numberField(body.stopLoss);
+  const supportedContracts = new Set(["CALL", "PUT", "DIGITUNDER", "DIGITOVER", "DIGITMATCH", "DIGITDIFF", "DIGITEVEN", "DIGITODD", "MULTUP", "MULTDOWN"]);
+  const digitContract = contractType.startsWith("DIGIT");
+  const multiplierContract = contractType === "MULTUP" || contractType === "MULTDOWN";
+  const validBarrier = !["DIGITUNDER", "DIGITOVER", "DIGITMATCH", "DIGITDIFF"].includes(contractType) ||
+    (typeof barrier === "string" && /^[0-9]$/.test(barrier));
+  const validDuration = Number.isInteger(duration) && Number(duration) >= 1 && Number(duration) <= (digitContract ? 10 : 10) &&
+    (digitContract ? durationUnit === "t" : durationUnit === "m");
+  if (!/^[A-Z0-9_]{2,32}$/.test(symbol) || !supportedContracts.has(contractType) ||
+      !validDuration || !validBarrier || stake === null || stake <= 0 ||
+      (takeProfit !== null && takeProfit <= 0) || (stopLoss !== null && stopLoss <= 0) ||
+      ((takeProfit !== null || stopLoss !== null) && !multiplierContract)) {
+    json(res, 400, { error: "Unsupported or invalid contract parameters. Digit contracts require a 0–9 prediction and tick duration; Rise/Fall requires minute duration. Broker take-profit/stop-loss is currently accepted only for multiplier contracts." }); return;
   }
   let account: DemoAccount | null = null;
   try {
@@ -142,16 +153,29 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       const markerValue = JSON.stringify({ status: "pending_reconciliation", requestId, symbol, contractType, stake, createdAt: new Date().toISOString() });
       const reserved = await redisCommand<string>(["SET", idempotencyKey, markerValue, "NX", "EX", 86400]);
       if (reserved !== "OK") { json(res, 409, { error: "This idempotency key has already been reserved; reconcile broker history before retrying." }); return; }
-      const proposal = await brokerRequest(session.accessToken, [{ proposal: 1, amount: stake, basis: "stake",
-        contract_type: contractType, currency: account.currency, duration: Number(duration), duration_unit: "m", symbol }]);
+      const proposalPayload: Record<string, unknown> = { proposal: 1, amount: stake, basis: "stake",
+        contract_type: contractType, currency: account.currency, duration: Number(duration), duration_unit: durationUnit, symbol };
+      if (["DIGITUNDER", "DIGITOVER", "DIGITMATCH", "DIGITDIFF"].includes(contractType)) proposalPayload.barrier = barrier;
+      if (multiplierContract) {
+        proposalPayload.multiplier = 10;
+        if (takeProfit !== null || stopLoss !== null) {
+          proposalPayload.limit_order = {
+            ...(takeProfit !== null ? { take_profit: takeProfit } : {}),
+            ...(stopLoss !== null ? { stop_loss: stopLoss } : {})
+          };
+        }
+      }
+      const proposal = await brokerRequest(session.accessToken, [proposalPayload]);
       const proposalData = proposal[1]?.proposal;
       if (!proposalData?.id || numberField(proposalData.ask_price) === null) throw new Error("Broker proposal was incomplete; no buy request was sent.");
       const buy = await brokerRequest(session.accessToken, [{ buy: String(proposalData.id), price: stake }]);
       const receipt = buy[1]?.buy;
       if (!receipt?.contract_id || numberField(receipt.buy_price) === null) throw new Error("Broker buy receipt was not confirmed. Reconcile account history before retrying.");
       const result = { status: "open", mode: "demo", account: account.loginid, contractId: receipt.contract_id,
-        transactionId: receipt.transaction_id ?? null, symbol, contractType, stake: receipt.buy_price, currency: account.currency,
-        proposalPayout: proposalData.payout ?? null, dailyNetPnlAtEntry: dailyNetPnl, submittedAt: new Date().toISOString(),
+        transactionId: receipt.transaction_id ?? null, symbol, contractType, barrier: barrier ?? null, duration: Number(duration), durationUnit,
+        takeProfit: takeProfit ?? null, stopLoss: stopLoss ?? null, stake: receipt.buy_price, currency: account.currency,
+        proposalPayout: proposalData.payout ?? null, longcode: proposalData.longcode ?? null,
+        dailyNetPnlAtEntry: dailyNetPnl, submittedAt: new Date().toISOString(),
         brokerConfirmed: true, liveTradingEnabled: false };
       await redisCommand(["SET", `${storagePrefix}:idempotency:${requestId}`, JSON.stringify(result), "EX", 86400]);
       await redisCommand(["SET", `${storagePrefix}:contract:${receipt.contract_id}`, JSON.stringify(result), "EX", 604800]);
