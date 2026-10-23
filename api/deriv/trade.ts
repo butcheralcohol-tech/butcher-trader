@@ -119,7 +119,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       !validDuration || !validBarrier || !validSecondBarrier || stake === null || stake <= 0 ||
       (takeProfit !== null && takeProfit <= 0) || (stopLoss !== null && stopLoss <= 0) ||
       ((takeProfit !== null || stopLoss !== null) && !multiplierContract) ||
-      (digitBarrierContract && (!/^\\d$/.test(barrierText) || Number(barrierText) > 9))) {
+      (digitBarrierContract && (!/^\d$/.test(barrierText) || Number(barrierText) > 9))) {
     json(res, 400, { error: "Invalid contract parameters. Contract availability and exact duration rules are verified against Deriv before a proposal is sent. TP/SL is currently supported only for multiplier contracts." }); return;
   }
   let account: DemoAccount | null = null;
