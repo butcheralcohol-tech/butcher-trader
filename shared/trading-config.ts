@@ -6,7 +6,7 @@ export const TRADING_POLICY = Object.freeze({
   dailyLossLimitUsd: 20,
   dailyLossLimitsUsd: Object.freeze({ SYNTHETIC: 20, FOREX: 20 }),
   sessionLossLimitUsd: 20,
-  riskPercent: 1, dailyLossLimitPercent: 2,
+  riskPercent: 1, dailyLossLimitPercent: 3,
   dailyLossAction: "PAUSE_UNTIL_NEXT_DAY" as const, maxOpenPositions: 1,
   strategyMethod: "weighted" as const, liveTradingEnabled: false as const,
   demoTestingRequired: true as const, authorizationRequired: true as const,
