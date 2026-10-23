@@ -32,7 +32,14 @@ export default function App() {
       {nav("account", "Deriv connection", <KeyRound size={17} />)}
       {nav("risk", "Risk controls", <ShieldCheck size={17} />)}
       <div className="side-bottom"><div className="status-led" /><div><b>DEMO PROTOCOL</b><small>LIVE ORDERS DISABLED</small></div></div></aside>
-    <main className="main"><header className="topbar"><div><div className="eyebrow">TRADING INTELLIGENCE / {view.toUpperCase()}</div><h1>{titles[view]}<span>.</span></h1></div><div className="top-actions"><span className="demo-badge"><span /> DEMO MODE</span><div className="avatar">BT</div></div></header>
+    <main className="main"><header className="topbar"><div><div className="eyebrow"><span className="header-live-dot" /> BUTCHER TERMINAL / {view.toUpperCase()}</div><h1>{titles[view]}<span>.</span></h1></div><div className="top-actions"><span className="demo-badge"><span /> DEMO MODE</span><div className="avatar">BT</div></div></header>
+      <section className="terminal-ribbon" aria-label="System status">
+        <div><span className="ribbon-led" /> SYSTEM <b>OPERATIONAL</b></div>
+        <div>ACCOUNT <b>VIRTUAL / DEMO</b></div>
+        <div>RISK ENGINE <b>ARMED</b></div>
+        <div>EXECUTION <b className="ribbon-lock">LIVE LOCKED</b></div>
+        <div className="ribbon-clock">{new Date().toLocaleTimeString("en-GB", { hour12: false })} LOCAL</div>
+      </section>
       <nav className="mobile-nav" aria-label="Sections">{(Object.keys(titles) as View[]).map(id => <button key={id} className={view === id ? "on" : ""} onClick={() => setView(id)}>{titles[id]}</button>)}</nav>
       {view === "overview" && <Overview paper={paper} /> }
       {view === "lab" && <StrategyLab />}
