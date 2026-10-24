@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
 import { OAUTH_COOKIE, decryptSession, parseCookies } from "../../shared/oauth-session.js";
 import { evaluateDemoExecutionRisk, type DemoAccount } from "../../shared/demo-execution.js";
+import { workerSession } from "../../shared/worker-auth.js";
 import { classifyAccount, otpEnvironment } from "../../shared/account-kind.js";
 import { computeRiskTotals, HISTORY_ROW_LIMIT, numberField, utcDayStart } from "../../shared/risk-accounting.js";
 import { evaluateRealExecutionRisk, isHalted, loadRealConfig, type RealConfig } from "../../shared/real-gate.js";
@@ -192,7 +193,8 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
 
   const secret = process.env.SESSION_SECRET ?? "";
   const cookies = parseCookies(typeof req.headers.cookie === "string" ? req.headers.cookie : null);
-  const session = decryptSession(cookies[OAUTH_COOKIE], secret);
+  // The always-on worker authenticates with a server-side service credential; it still passes every gate below.
+  const session = workerSession(typeof req.headers.authorization === "string" ? req.headers.authorization : undefined, process.env) ?? decryptSession(cookies[OAUTH_COOKIE], secret);
   if (!session) {
     json(res, 401, { error: "Connect Deriv again before placing an order." });
     return;
