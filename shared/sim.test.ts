@@ -3,9 +3,23 @@ import assert from "node:assert/strict";
 import { createState, finalize, stepCandle, DEFAULT_SIM, type SimConfig } from "./sim.js";
 import type { Candle, Signal } from "./types.js";
 
-const cfg: SimConfig = { ...DEFAULT_SIM, feeBps: 0, slippageBps: 0, maxHoldBars: 10, riskPercent: 1, dailyLossLimitPercent: 3 };
+const cfg: SimConfig = {
+  ...DEFAULT_SIM,
+  feeBps: 0,
+  slippageBps: 0,
+  maxHoldBars: 10,
+  riskPercent: 1,
+  dailyLossLimitPercent: 3,
+};
+
 const T = 1_700_000_000;
-const c = (i: number, o: number, h: number, l: number, cl: number): Candle => ({ time: T + i * 60, open: o, high: h, low: l, close: cl });
+const c = (i: number, o: number, h: number, l: number, cl: number): Candle => ({
+  time: T + i * 60,
+  open: o,
+  high: h,
+  low: l,
+  close: cl,
+});
 const long: Signal = { side: "LONG", stop: 99, target: 102, reason: "test" };
 
 test("fills at the NEXT candle open and sizes by risk (1% of 1000 = $10 over a $1 stop = 10 units)", () => {
@@ -120,7 +134,6 @@ test("shorts mirror longs", () => {
   assert.equal(s.trades[0].exitReason, "target");
   assert.ok(s.trades[0].pnl > 0);
 });
-
 
 test("adjustable per-trade profit target closes a paper position at the configured net target", () => {
   const s = createState(1000);
