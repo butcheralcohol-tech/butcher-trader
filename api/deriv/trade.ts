@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
 import { OAUTH_COOKIE, decryptSession, parseCookies } from "../../shared/oauth-session.js";
 import { evaluateDemoExecutionRisk, type DemoAccount } from "../../shared/demo-execution.js";
+import { numberField, transactionMarket, transactionPnl, transactionTime, validateRiskHistory } from "../../shared/deriv-history.js";
 
 type DerivReply = {
   req_id?: number;
@@ -163,31 +164,7 @@ function todayStartUnix(): number {
   return Math.floor(d.getTime() / 1000);
 }
 
-function numberField(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))) return Number(value);
-  return null;
-}
 
-function transactionPnl(transaction: Record<string, unknown>): number | null {
-  const direct = numberField(transaction.profit);
-  if (direct !== null) return direct;
-  const sell = numberField(transaction.sell_price);
-  const buy = numberField(transaction.buy_price);
-  if (sell === null || buy === null) return null;
-  return sell - buy;
-}
-
-function transactionTime(transaction: Record<string, unknown>): number | null {
-  const sell = numberField(transaction.sell_time);
-  if (sell !== null) return sell;
-  return numberField(transaction.purchase_time);
-}
-
-function transactionMarket(transaction: Record<string, unknown>): string {
-  const value = transaction.underlying ?? transaction.symbol ?? transaction.display_name ?? "";
-  return typeof value === "string" ? value : "";
-}
 
 export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (req.method !== "POST") {
@@ -324,19 +301,11 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     const profits = authReplies[2] as unknown as { profit_table?: { transactions?: Array<Record<string, unknown>> } };
     const transactions = profits.profit_table?.transactions;
     if (!Array.isArray(transactions)) throw new Error("Broker profit history is unavailable; fail closed.");
-    if (transactions.length >= 500) {
-      throw new Error("Broker history reached the query limit; risk totals may be incomplete, so demo orders are disabled.");
-    }
-
-    // Temporary diagnostic: confirm the actual field names in the deployed response.
-    console.log("[trade] profit_table sample:", JSON.stringify(transactions.slice(0, 2)));
-
-    if (transactions.some((transaction) =>
-      transactionTime(transaction) === null ||
-      transactionPnl(transaction) === null ||
-      transactionMarket(transaction) === ""
-    )) {
-      throw new Error("Broker history is missing timestamps, P&L, or market identifiers; risk accounting is incomplete, so demo orders are disabled.");
+    const historyIssues = validateRiskHistory(transactions);
+    if (historyIssues.length > 0) {
+      // Keep trading disabled when completeness cannot be proven, but report the
+      // missing field categories rather than logging potentially sensitive history.
+      throw new Error(historyIssues.join(" "));
     }
 
     const today = todayStartUnix();
