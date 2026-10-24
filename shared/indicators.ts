@@ -22,7 +22,9 @@ export function ema(values: number[], period: number): number[] {
   let seed = 0;
   for (let i = 0; i < period; i++) seed += values[i];
   out[period - 1] = seed / period;
-  for (let i = period; i < values.length; i++) out[i] = values[i] * k + out[i - 1] * (1 - k);
+  for (let i = period; i < values.length; i++) {
+    out[i] = values[i] * k + out[i - 1] * (1 - k);
+  }
   return out;
 }
 
@@ -30,13 +32,17 @@ export function ema(values: number[], period: number): number[] {
 export function rsi(closes: number[], period = 14): number[] {
   const out = blank(closes.length);
   if (!Number.isInteger(period) || period < 1 || closes.length <= period) return out;
-  let gain = 0, loss = 0;
+  let gain = 0;
+  let loss = 0;
   for (let i = 1; i <= period; i++) {
     const d = closes[i] - closes[i - 1];
-    if (d >= 0) gain += d; else loss -= d;
+    if (d >= 0) gain += d;
+    else loss -= d;
   }
-  let avgGain = gain / period, avgLoss = loss / period;
-  const toRsi = () => (avgLoss === 0 ? (avgGain === 0 ? 50 : 100) : 100 - 100 / (1 + avgGain / avgLoss));
+  let avgGain = gain / period;
+  let avgLoss = loss / period;
+  const toRsi = () =>
+    avgLoss === 0 ? (avgGain === 0 ? 50 : 100) : 100 - 100 / (1 + avgGain / avgLoss);
   out[period] = toRsi();
   for (let i = period + 1; i < closes.length; i++) {
     const d = closes[i] - closes[i - 1];
@@ -51,10 +57,20 @@ export function rsi(closes: number[], period = 14): number[] {
 export function atr(candles: Candle[], period = 14): number[] {
   const out = blank(candles.length);
   if (!Number.isInteger(period) || period < 1 || candles.length < period) return out;
-  const tr = candles.map((c, i) => i === 0 ? c.high - c.low : Math.max(c.high - c.low, Math.abs(c.high - candles[i - 1].close), Math.abs(c.low - candles[i - 1].close)));
+  const tr = candles.map((c, i) =>
+    i === 0
+      ? c.high - c.low
+      : Math.max(
+          c.high - c.low,
+          Math.abs(c.high - candles[i - 1].close),
+          Math.abs(c.low - candles[i - 1].close),
+        ),
+  );
   let seed = 0;
   for (let i = 0; i < period; i++) seed += tr[i];
   out[period - 1] = seed / period;
-  for (let i = period; i < candles.length; i++) out[i] = (out[i - 1] * (period - 1) + tr[i]) / period;
+  for (let i = period; i < candles.length; i++) {
+    out[i] = (out[i - 1] * (period - 1) + tr[i]) / period;
+  }
   return out;
 }
