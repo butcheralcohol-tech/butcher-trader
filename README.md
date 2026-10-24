@@ -18,3 +18,18 @@ Standalone React + TypeScript trading research dashboard. The frontend is built 
 - Shared pure logic in `shared/` is used by the Express server, the Vercel functions and the browser, and is covered by unit tests (risk gate, indicators, simulator, backtester incl. a no-look-ahead test, candle parsing, feed reconnect behaviour, paper session).
 
 ## Architecture
+
+## Real-money execution (off by default)
+
+Demo accounts (`VRTC…`) trade with the normal risk rules. Real accounts (`CR…`) are refused unless **all** of these hold:
+
+1. `ALLOW_REAL_TRADING=I_ACCEPT_REAL_MONEY_LOSSES` on the server
+2. the account is in `REAL_ACCOUNT_ALLOWLIST`
+3. `REAL_MAX_STAKE` and `REAL_DAILY_LOSS_LIMIT` are set
+4. at least `REAL_MIN_DEMO_ORDERS` (30+) demo orders were confirmed
+5. the dashboard user types `TRADE REAL MONEY`
+6. stake ≤ min(1% of balance, `REAL_MAX_STAKE`), daily loss ≤ min(`REAL_DAILY_LOSS_LIMIT`, 3% of balance), and no contract already open
+
+Kill switches: `TRADING_HALTED=true` (env) or the Redis key `butcher:halt`. Wallet accounts are unsupported. Trading carries real risk of loss; run demo for weeks first.
+
+The **Broker trades** view lists real and demo contracts with a mode badge.

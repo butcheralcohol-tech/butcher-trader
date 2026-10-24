@@ -5,6 +5,8 @@ import CandleChart from "./CandleChart";
 import { useLiveFeed } from "../hooks/useLiveFeed";
 import { fmt, money, signedMoney } from "../lib/format";
 import { MARKETS } from "../lib/markets";
+import { useDerivAccounts } from "../lib/derivAccounts";
+import AccountPicker from "./AccountPicker";
 
 type Side = "LONG" | "SHORT";
 type ManualPosition = { side: Side; entry: number; stake: number; openedAt: number };
@@ -57,55 +59,14 @@ export default function ManualTrading() {
     "Connect a Deriv virtual account before placing demo orders.",
   );
   const [brokerOrders, setBrokerOrders] = useState<Array<Record<string, unknown>>>([]);
-  const [brokerAccount, setBrokerAccount] = useState("");
+  const acct = useDerivAccounts();
+  const brokerAccount = acct.selected?.id ?? "";
   const [discoveredContracts, setDiscoveredContracts] = useState<DiscoveredContract[]>([]);
   const [durationUnit, setDurationUnit] = useState("m");
   const [barrier2, setBarrier2] = useState("");
   const [discoveryMessage, setDiscoveryMessage] = useState(
     "Connect Deriv to load market-specific contract availability.",
   );
-
-  // Discover the connected demo account from the OAuth session.
-  useEffect(() => {
-    if (brokerAccount) return;
-    let active = true;
-    fetch("/api/deriv/session", { credentials: "same-origin", cache: "no-store" })
-      .then((response) => (response.ok ? response.json() : null))
-      .then(
-        (
-          data: {
-            connected?: boolean;
-            accounts?: Array<{ account_id?: string; currency?: string }>;
-            accountError?: string | null;
-          } | null,
-        ) => {
-          if (!active) return;
-          if (!data?.connected) {
-            setBrokerMessage("Connect Deriv before placing demo orders.");
-            return;
-          }
-          const demo = data.accounts?.find((a) => /^VRTC|^DOT/i.test(a.account_id ?? ""));
-          if (demo?.account_id) {
-            setBrokerAccount(demo.account_id);
-            setBrokerMessage(
-              `Deriv virtual account ${demo.account_id} ready for demo orders.`,
-            );
-          } else if (data.accountError) {
-            setBrokerMessage(data.accountError);
-          } else {
-            setBrokerMessage(
-              "No Deriv virtual account found for this session. Connect a demo account.",
-            );
-          }
-        },
-      )
-      .catch(() => {
-        if (active) setBrokerMessage("Could not read Deriv session status.");
-      });
-    return () => {
-      active = false;
-    };
-  }, [brokerAccount]);
 
   // Contract discovery: only fire once an account is known.
   useEffect(() => {
@@ -175,7 +136,6 @@ export default function ManualTrading() {
         trades?: Array<Record<string, unknown>>;
       };
       if (!response.ok) throw new Error(data.error || "Could not reconcile broker history.");
-      setBrokerAccount(data.account || brokerAccount);
       setBrokerOrders(Array.isArray(data.trades) ? data.trades : []);
       setBrokerMessage("Broker history refreshed. Contract statuses are reported from Deriv.");
     } catch (error) {
@@ -188,7 +148,11 @@ export default function ManualTrading() {
   const placeBrokerOrder = async () => {
     if (brokerBusy || !Number.isFinite(brokerStake) || brokerStake <= 0) return;
     if (!brokerAccount) {
-      setBrokerMessage("Connect and select a Deriv virtual account before placing an order.");
+      setBrokerMessage("Select a Deriv trading account first.");
+      return;
+    }
+    if (!acct.orderFields) {
+      setBrokerMessage("Select a Deriv trading account first.");
       return;
     }
     setBrokerBusy(true);
@@ -202,7 +166,7 @@ export default function ManualTrading() {
         credentials: "same-origin",
         headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
         body: JSON.stringify({
-          accountId: brokerAccount,
+          ...acct.orderFields,
           symbol,
           contractType,
           duration,
@@ -229,9 +193,8 @@ export default function ManualTrading() {
       };
       if (!response.ok) throw new Error([data.error, ...(data.reasons || [])].filter(Boolean).join(" "));
       setBrokerMessage(
-        `Deriv confirmed demo contract #${data.contractId} · ${data.stake} ${data.currency} · status ${data.status}.`,
+        `Deriv confirmed ${acct.selected?.kind === "real" ? "REAL" : "demo"} contract #${data.contractId} · ${data.stake} ${data.currency} · status ${data.status}.`,
       );
-      setBrokerAccount(data.account || brokerAccount);
       await refreshBrokerOrders();
     } catch (error) {
       setBrokerMessage(
@@ -285,10 +248,11 @@ export default function ManualTrading() {
       <section className="panel">
         <div className="card-title">
           <b>Deriv broker orders</b>
-          <span className="card-status">VIRTUAL ACCOUNT ONLY</span>
+          <span className="card-status">{acct.selected?.kind === "real" ? "REAL ACCOUNT" : "DEMO ACCOUNT"}</span>
         </div>
+        <AccountPicker />
         <p className="hint">
-          These controls submit contracts only to an authenticated Deriv virtual account. The
+          These controls submit contracts to the Deriv account selected above (demo by default). The
           server validates the account, stake risk, daily locks, open-contract limits and
           duplicate-request protection. Availability depends on the selected market and Deriv
           contract rules.
@@ -467,6 +431,7 @@ export default function ManualTrading() {
             disabled={
               brokerBusy ||
               !brokerAccount ||
+              (acct.selected?.kind === "real" && !acct.realConfirmed) ||
               !Number.isFinite(brokerStake) ||
               brokerStake <= 0 ||
               (selectedContract.barrier && !/^[0-9]$/.test(barrier)) ||
@@ -476,7 +441,7 @@ export default function ManualTrading() {
             }
             onClick={placeBrokerOrder}
           >
-            {brokerBusy ? "Submitting…" : `Place demo ${selectedContract.label} contract`}
+            {brokerBusy ? "Submitting…" : `Place ${acct.selected?.kind === "real" ? "REAL" : "demo"} ${selectedContract.label} contract`}
           </button>
         </div>
         {selectedContract.limits && (
@@ -685,9 +650,9 @@ export default function ManualTrading() {
         </div>
       </section>
       <section className="warning-note">
-        <b>Real-money trading remains disabled</b>
+        <b>Real-money orders are locked by default</b>
         <p>
-          Only virtual-account orders are allowed. The contract menu is a limited initial set, not
+          Demo orders work immediately. A real account is refused unless the server owner enabled it for that exact account and every risk gate passes. The contract menu is a limited initial set, not
           every Deriv contract type. Broker support, proposal acceptance, TP/SL behavior and
           settlement reconciliation must be verified in demo before expanding coverage.
         </p>
