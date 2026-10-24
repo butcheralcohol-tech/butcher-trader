@@ -73,8 +73,6 @@ async function brokerRequest(
     Authorization: `Bearer ${token}`,
     Accept: "application/json",
   };
-  // Optional: only sent when a numeric DERIV_APP_ID is configured (PAT mode).
-  // OAuth tokens do not require it, so a missing value is not an error.
   const appId = process.env.DERIV_APP_ID?.trim();
   if (appId && /^\d+$/.test(appId)) {
     headers["Deriv-App-ID"] = appId;
@@ -295,7 +293,9 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       throw new Error("Could not verify the broker balance and currency.");
     }
 
-    if (!/^VRTC\d+$/i.test(accountId)) {
+    // Accept both demo prefixes: VRTC (classic) and DOT (current API).
+    // Real (CR) and wallet (CRW/VRW) accounts still fail this check.
+    if (!/^(VRTC|DOT)\d+$/i.test(accountId)) {
       json(res, 403, { error: "This endpoint only permits broker-verified Deriv virtual accounts." });
       return;
     }
