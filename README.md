@@ -33,3 +33,14 @@ Demo accounts (`VRTCâ€¦`) trade with the normal risk rules. Real accounts (`CRâ€
 Kill switches: `TRADING_HALTED=true` (env) or the Redis key `butcher:halt`. Wallet accounts are unsupported. Trading carries real risk of loss; run demo for weeks first.
 
 The **Broker trades** view lists real and demo contracts with a mode badge.
+
+## Always-on worker (auto-execution with the browser closed)
+
+Vercel functions cannot run continuously, so the robot loop runs as a small separate process (`npm run worker`, or `Dockerfile.worker`) on any always-on host (Railway, Render, Fly, a VPS).
+
+- It pulls live Deriv candles, runs the paper strategy ensemble, saves its state to Upstash Redis, and sends each new entry to `/api/deriv/trade` with a service credential. Every server gate still applies (risk limits, one open contract, real-money gate, kill switches).
+- State is saved **before** an order is sent, so a crash or restart can drop a signal but never send one twice. History is never replayed on start.
+- **Start in dry-run** (`WORKER_ENABLED=false`): signals are logged but no order is sent. Check `GET /health`, then set `WORKER_ENABLED=true` on a demo account.
+- Setup: on Vercel set `WORKER_SECRET` and `DERIV_WORKER_TOKEN`; on the worker host set `WORKER_API_BASE`, `WORKER_SECRET`, `WORKER_ACCOUNT_ID`, `UPSTASH_REDIS_REST_URL/TOKEN`. See `.env.example`.
+- A real (`CR`/`ROT`) account also needs `WORKER_REAL_CONFIRMATION=TRADE REAL MONEY`, plus all the server-side real-money settings above.
+- Stop it instantly with the kill switch (`butcher:halt` in Redis or `TRADING_HALTED=true`) or by stopping the process.

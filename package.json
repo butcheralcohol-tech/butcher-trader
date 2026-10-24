@@ -11,7 +11,8 @@
     "start": "tsx server/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test shared/*.test.ts server/*.test.ts",
-    "check": "npm test && npm run typecheck"
+    "check": "npm test && npm run typecheck",
+    "worker": "tsx worker/index.ts"
   },
   "dependencies": {
     "cors": "^2.8.5",
