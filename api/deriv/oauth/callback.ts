@@ -1,5 +1,15 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { clearCookie, cookie, decryptSession, encryptSession, OAUTH_COOKIE, OAUTH_STATE_COOKIE, OAUTH_VERIFIER_COOKIE, parseCookies, safeEqual } from "../../../shared/oauth-session.js";
+import {
+  clearCookie,
+  cookie,
+  decryptSession,
+  encryptSession,
+  OAUTH_COOKIE,
+  OAUTH_STATE_COOKIE,
+  OAUTH_VERIFIER_COOKIE,
+  parseCookies,
+  safeEqual,
+} from "../../../shared/oauth-session.js";
 
 const TOKEN_URL = "https://auth.deriv.com/oauth2/token";
 const APP_ORIGIN = "https://butcherfx.vercel.app";
@@ -27,7 +37,10 @@ function redirect(res: ServerResponse, location: string, cookies: string[]): voi
   res.end();
 }
 
-function accountRedirect(result: "failed" | "cancelled" | "misconfigured" | "connected", reason?: FailureReason): string {
+function accountRedirect(
+  result: "failed" | "cancelled" | "misconfigured" | "connected",
+  reason?: FailureReason,
+): string {
   const target = new URL("/", APP_ORIGIN);
   target.searchParams.set("view", "account");
   target.searchParams.set("deriv_oauth", result);
@@ -96,20 +109,32 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       fail(res, clearPending, "token_exchange_rejected");
       return;
     }
-    const token = await response.json() as { access_token?: unknown; expires_in?: unknown; token_type?: unknown };
+
+    const token = (await response.json()) as {
+      access_token?: unknown;
+      expires_in?: unknown;
+      token_type?: unknown;
+    };
     if (
       typeof token.access_token !== "string" ||
       !token.access_token ||
-      (token.token_type !== undefined && (typeof token.token_type !== "string" || token.token_type.toLowerCase() !== "bearer"))
+      (token.token_type !== undefined &&
+        (typeof token.token_type !== "string" || token.token_type.toLowerCase() !== "bearer"))
     ) {
       fail(res, clearPending, "token_response_invalid");
       return;
     }
-    const expiresIn = typeof token.expires_in === "number" && Number.isFinite(token.expires_in)
-      ? Math.max(60, Math.min(token.expires_in, 3600))
-      : 3600;
+
+    const expiresIn =
+      typeof token.expires_in === "number" && Number.isFinite(token.expires_in)
+        ? Math.max(60, Math.min(token.expires_in, 3600))
+        : 3600;
     const expiresAt = Date.now() + expiresIn * 1000;
-    const encrypted = encryptSession({ accessToken: token.access_token, expiresAt }, secret);
+
+    const encrypted = encryptSession(
+      { accessToken: token.access_token, expiresAt },
+      secret,
+    );
     if (encrypted.length > 3500) {
       fail(res, clearPending, "session_cookie_too_large");
       return;
@@ -118,6 +143,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       fail(res, clearPending, "session_storage_failed");
       return;
     }
+
     redirect(res, accountRedirect("connected"), [
       ...clearPending,
       cookie(OAUTH_COOKIE, encrypted, expiresIn),
