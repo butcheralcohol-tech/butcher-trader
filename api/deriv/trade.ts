@@ -60,30 +60,31 @@ async function releaseLock(key: string, owner: string): Promise<void> {
 /**
  * Opens an authenticated WebSocket to Deriv using the OTP-URL flow.
  *
- * Authentication happens before connect: POST to the OTP endpoint with the
- * Bearer token (plus Deriv-App-ID for PAT), then connect to the returned
- * wss:// URL directly. No `authorize` message is sent after connect.
- *
- * The OTP is valid for 120 seconds and single-use; connect immediately.
+ * Authentication is handled entirely by the Bearer token exchanged for the
+ * OTP URL. For OAuth tokens the `Deriv-App-ID` header is optional; it is only
+ * sent when a numeric app ID is configured (needed for PAT tokens).
  */
 async function brokerRequest(
   token: string,
   accountId: string,
   payloads: Record<string, unknown>[],
 ): Promise<DerivReply[]> {
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${token}`,
+    Accept: "application/json",
+  };
+  // Optional: only sent when a numeric DERIV_APP_ID is configured (PAT mode).
+  // OAuth tokens do not require it, so a missing value is not an error.
   const appId = process.env.DERIV_APP_ID?.trim();
-  if (!appId || !/^\d+$/.test(appId)) {
-    throw new Error("Server-side DERIV_APP_ID is not configured.");
+  if (appId && /^\d+$/.test(appId)) {
+    headers["Deriv-App-ID"] = appId;
   }
 
   const otpResponse = await fetch(
     `https://api.derivws.com/trading/v1/options/accounts/${encodeURIComponent(accountId)}/otp`,
     {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Deriv-App-ID": appId,
-      },
+      headers,
       signal: AbortSignal.timeout(8000),
     },
   );
@@ -256,11 +257,6 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
   const validSecondBarrier = contractType !== "RANGE" || (barrier2Text.length > 0 && barrier2Text.length <= 24 &&
     /^-?\d+(?:\.\d+)?$/.test(barrier2Text) && Number(barrier2Text) !== Number(barrierText));
 
-  // Digit Under/Over barrier validation.
-  // Deriv's contract_type enum lists DIGITOVER and DIGITUNDER separately; the
-  // legacy doc's "Over uses DIGITMATCH" line is an error and is ignored here.
-  // Under with barrier 0 and Over with barrier 9 are mathematically impossible,
-  // so reject them before the broker sees the proposal.
   const validDigitBarrier = !digitBarrierContract || (() => {
     if (!/^\d$/.test(barrierText)) return false;
     const n = Number(barrierText);
@@ -406,8 +402,6 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
         return;
       }
 
-      // contracts_for is a market-data endpoint; currency and product_type
-      // were removed in the current API. Only the symbol is needed.
       const availabilityReply = await brokerRequest(session.accessToken, accountId, [
         { contracts_for: symbol },
       ]);
@@ -435,8 +429,6 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
         return;
       }
 
-      // symbol was renamed to underlying_symbol in the current API.
-      // loginid and barrier_range were removed from the request.
       const proposalPayload: Record<string, unknown> = {
         proposal: 1,
         amount: stake,
@@ -465,7 +457,6 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
         throw new Error("Broker proposal was incomplete; no buy request was sent.");
       }
 
-      // loginid was removed from the buy request in the current API.
       const buy = await brokerRequest(session.accessToken, accountId, [
         { buy: String(proposalData.id), price: stake },
       ]);
