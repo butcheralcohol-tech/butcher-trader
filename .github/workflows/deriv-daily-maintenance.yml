@@ -23,7 +23,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm install
+          cache: npm
+      - run: npm ci
       - name: Request public candle history
         env:
           DERIV_APP_ID: ${{ vars.DERIV_APP_ID || '1089' }}
@@ -88,19 +89,25 @@ jobs:
     name: Create a tested dependency update PR
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    needs: api-compatibility
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
       - name: Resolve dependencies and refresh compatible versions
         run: |
           npm install --package-lock-only
           npm update
-      - run: npm ci
-      - run: npm test
-      - run: npm run typecheck
-      - run: npm run build
+      - name: Install from refreshed lockfile
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Test
+        run: npm test
+      - name: Build
+        run: npm run build
       - name: Open or update dependency PR (never deploy automatically)
         uses: peter-evans/create-pull-request@v7
         with:
@@ -113,7 +120,7 @@ jobs:
             Automated daily dependency refresh.
 
             - Resolves compatible npm updates within the ranges already declared in package.json.
-            - Runs tests, TypeScript checks, and the production build before proposing changes.
+            - Runs typecheck, tests, and the production build before proposing changes.
             - Review this pull request and CI results before merging.
             - This workflow does not change trading strategies, risk limits, or enable live trading.
           labels: |
