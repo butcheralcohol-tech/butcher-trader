@@ -1,4 +1,10 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import {
+  createCipheriv,
+  createDecipheriv,
+  createHash,
+  randomBytes,
+  timingSafeEqual,
+} from "node:crypto";
 
 export const OAUTH_COOKIE = "butcher_deriv_session";
 export const OAUTH_STATE_COOKIE = "butcher_deriv_oauth_state";
@@ -23,7 +29,11 @@ export function parseCookies(header: string | null): Record<string, string> {
     if (i < 1) continue;
     const name = part.slice(0, i).trim();
     const value = part.slice(i + 1).trim();
-    try { result[name] = decodeURIComponent(value); } catch { /* ignore malformed cookie */ }
+    try {
+      result[name] = decodeURIComponent(value);
+    } catch {
+      /* ignore malformed cookie */
+    }
   }
   return result;
 }
@@ -58,7 +68,14 @@ export function decryptSession(value: string | undefined, secret: string): Deriv
     decipher.setAuthTag(tag);
     const plain = Buffer.concat([decipher.update(encrypted), decipher.final()]).toString("utf8");
     const parsed = JSON.parse(plain) as Partial<DerivSession>;
-    if (typeof parsed.accessToken !== "string" || !parsed.accessToken || typeof parsed.expiresAt !== "number" || parsed.expiresAt <= Date.now()) return null;
+    if (
+      typeof parsed.accessToken !== "string" ||
+      !parsed.accessToken ||
+      typeof parsed.expiresAt !== "number" ||
+      parsed.expiresAt <= Date.now()
+    ) {
+      return null;
+    }
     return { accessToken: parsed.accessToken, expiresAt: parsed.expiresAt };
   } catch {
     return null;

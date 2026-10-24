@@ -45,35 +45,53 @@ export class DerivOptionsClient {
     socketFactory?: (url: string) => WebSocket;
   }): Promise<DerivOptionsClient> {
     const { accessToken, accountId } = input;
-    if (!accessToken || accessToken.length > 4096) throw new Error("A valid server-side Deriv access token is required.");
-    // This worker foundation deliberately permits demo accounts only. Real account execution
-    // must not be reachable through an accidental environment-variable change.
-    if (!isDemoOptionsAccountId(accountId)) throw new Error("Only Deriv virtual trading accounts are enabled in this worker.");
+    if (!accessToken || accessToken.length > 4096) {
+      throw new Error("A valid server-side Deriv access token is required.");
+    }
+    // This worker foundation deliberately permits demo accounts only. Real account
+    // execution must not be reachable through an accidental environment-variable change.
+    if (!isDemoOptionsAccountId(accountId)) {
+      throw new Error("Only Deriv virtual trading accounts are enabled in this worker.");
+    }
     const fetchImpl = input.fetchImpl ?? fetch;
-    const headers: Record<string, string> = { Authorization: `Bearer ${accessToken}`, Accept: "application/json" };
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/json",
+    };
     // OAuth access tokens do not need Deriv-App-ID; PATs do.
     if (input.appId) {
       if (!/^\d+$/.test(input.appId)) throw new Error("DERIV_APP_ID must be numeric.");
       headers["Deriv-App-ID"] = input.appId;
     }
-    const response = await fetchImpl(`${API_BASE}/options/accounts/${encodeURIComponent(accountId)}/otp`, {
-      method: "POST",
-      headers,
-      signal: AbortSignal.timeout(OPEN_TIMEOUT_MS),
-    });
+    const response = await fetchImpl(
+      `${API_BASE}/options/accounts/${encodeURIComponent(accountId)}/otp`,
+      {
+        method: "POST",
+        headers,
+        signal: AbortSignal.timeout(OPEN_TIMEOUT_MS),
+      },
+    );
     let payload: ApiEnvelope<{ url?: string }>;
-    try { payload = await response.json() as ApiEnvelope<{ url?: string }>; }
-    catch { throw new Error("Deriv returned an unreadable OTP response."); }
+    try {
+      payload = (await response.json()) as ApiEnvelope<{ url?: string }>;
+    } catch {
+      throw new Error("Deriv returned an unreadable OTP response.");
+    }
     if (!response.ok) throw safeApiError(payload, response.status);
     const url = payload.data?.url;
     if (typeof url !== "string") throw new Error("Deriv OTP response did not include a WebSocket URL.");
     const parsed = new URL(url);
-    if (parsed.protocol !== "wss:" || parsed.hostname !== "api.derivws.com" ||
-        parsed.pathname !== "/trading/v1/options/ws/demo" || !parsed.searchParams.get("otp")) {
+    if (
+      parsed.protocol !== "wss:" ||
+      parsed.hostname !== "api.derivws.com" ||
+      parsed.pathname !== "/trading/v1/options/ws/demo" ||
+      !parsed.searchParams.get("otp")
+    ) {
       throw new Error("Deriv returned an unexpected or non-demo WebSocket URL.");
     }
     const client = new DerivOptionsClient(url);
-    const socketFactory = input.socketFactory ?? ((socketUrl: string) => new WebSocket(socketUrl));
+    const socketFactory =
+      input.socketFactory ?? ((socketUrl: string) => new WebSocket(socketUrl));
     await client.open(socketFactory);
     return client;
   }
@@ -86,13 +104,24 @@ export class DerivOptionsClient {
         socket.terminate();
         reject(new Error("Deriv Options WebSocket connection timed out."));
       }, OPEN_TIMEOUT_MS);
-      socket.once("open", () => { clearTimeout(timer); resolve(); });
-      socket.once("error", () => { clearTimeout(timer); reject(new Error("Deriv Options WebSocket connection failed.")); });
-      socket.once("close", () => { clearTimeout(timer); reject(new Error("Deriv Options WebSocket closed before connecting.")); });
+      socket.once("open", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      socket.once("error", () => {
+        clearTimeout(timer);
+        reject(new Error("Deriv Options WebSocket connection failed."));
+      });
+      socket.once("close", () => {
+        clearTimeout(timer);
+        reject(new Error("Deriv Options WebSocket closed before connecting."));
+      });
     });
   }
 
-  request<T extends OptionsMessage = OptionsMessage>(payload: Record<string, unknown>): Promise<T> {
+  request<T extends OptionsMessage = OptionsMessage>(
+    payload: Record<string, unknown>,
+  ): Promise<T> {
     const socket = this.ws;
     if (!socket || this.closed || socket.readyState !== WebSocket.OPEN) {
       return Promise.reject(new Error("Deriv Options session is not open."));
@@ -108,10 +137,17 @@ export class DerivOptionsClient {
         cleanup();
         reject(new Error("Deriv Options response timed out; reconcile broker state before retrying."));
       }, REQUEST_TIMEOUT_MS);
-      const onClose = () => { cleanup(); reject(new Error("Deriv Options connection closed during a request.")); };
+      const onClose = () => {
+        cleanup();
+        reject(new Error("Deriv Options connection closed during a request."));
+      };
       const onMessage = (raw: Buffer | ArrayBuffer | Buffer[]) => {
         let message: OptionsMessage;
-        try { message = JSON.parse(raw.toString()) as OptionsMessage; } catch { return; }
+        try {
+          message = JSON.parse(raw.toString()) as OptionsMessage;
+        } catch {
+          return;
+        }
         if (message.req_id !== req_id) return;
         cleanup();
         if (message.error) {
@@ -122,8 +158,11 @@ export class DerivOptionsClient {
       };
       socket.on("message", onMessage);
       socket.once("close", onClose);
-      socket.send(JSON.stringify({ ...payload, req_id }), error => {
-        if (error) { cleanup(); reject(new Error("Could not send request to Deriv Options.")); }
+      socket.send(JSON.stringify({ ...payload, req_id }), (error) => {
+        if (error) {
+          cleanup();
+          reject(new Error("Could not send request to Deriv Options."));
+        }
       });
     });
   }
@@ -133,9 +172,15 @@ export class DerivOptionsClient {
     const socket = this.ws;
     this.ws = null;
     if (!socket || socket.readyState === WebSocket.CLOSED) return;
-    await new Promise<void>(resolve => {
-      const timer = setTimeout(() => { socket.terminate(); resolve(); }, 2_000);
-      socket.once("close", () => { clearTimeout(timer); resolve(); });
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        socket.terminate();
+        resolve();
+      }, 2_000);
+      socket.once("close", () => {
+        clearTimeout(timer);
+        resolve();
+      });
       if (socket.readyState === WebSocket.CONNECTING) socket.terminate();
       else socket.close(1000, "Worker stopped");
     });
@@ -150,13 +195,37 @@ export function buildOptionsProposal(input: {
   stake: number;
   duration: number;
   durationUnit: "s" | "m" | "h" | "d" | "t";
+  barrier?: string | number;
 }): Record<string, unknown> {
   if (!/^[A-Z0-9_]{2,30}$/.test(input.underlyingSymbol)) throw new Error("Invalid underlying symbol.");
   if (!/^[A-Z]{3,5}$/.test(input.currency)) throw new Error("Invalid account currency.");
   if (!Number.isFinite(input.stake) || input.stake <= 0) throw new Error("Stake must be positive.");
   if (!Number.isInteger(input.duration) || input.duration < 1) throw new Error("Duration must be a positive integer.");
   if (!/^[A-Z_]{2,24}$/.test(input.contractType)) throw new Error("Invalid contract type.");
-  return {
+
+  // Digit barrier validation. Under 0 and Over 9 are impossible, so reject
+  // them before the proposal reaches the broker.
+  const digitBarrierContract = ["DIGITUNDER", "DIGITOVER", "DIGITMATCH", "DIGITDIFF"].includes(
+    input.contractType,
+  );
+  let barrierText: string | undefined;
+  if (digitBarrierContract) {
+    if (input.barrier === undefined || input.barrier === null || input.barrier === "") {
+      throw new Error("A digit barrier is required for this contract type.");
+    }
+    barrierText = String(input.barrier);
+    if (!/^\d$/.test(barrierText)) throw new Error("Digit barrier must be a single digit.");
+    const n = Number(barrierText);
+    if (input.contractType === "DIGITUNDER" && (n < 1 || n > 8)) {
+      throw new Error("Digit Under barrier must be between 1 and 8.");
+    }
+    if (input.contractType === "DIGITOVER" && (n < 1 || n > 8)) {
+      throw new Error("Digit Over barrier must be between 1 and 8.");
+    }
+    if (n > 9) throw new Error("Digit barrier must be a single digit.");
+  }
+
+  const proposal: Record<string, unknown> = {
     proposal: 1,
     amount: input.stake,
     basis: "stake",
@@ -166,4 +235,6 @@ export function buildOptionsProposal(input: {
     duration_unit: input.durationUnit,
     underlying_symbol: input.underlyingSymbol,
   };
+  if (barrierText !== undefined) proposal.barrier = barrierText;
+  return proposal;
 }

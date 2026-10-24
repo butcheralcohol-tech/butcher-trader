@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { atr, ema, rsi, sma } from "./indicators.js";
 import type { Candle } from "./types.js";
 
-const close = (a: number, b: number, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} !~ ${b}`);
+const close = (a: number, b: number, eps = 1e-9) =>
+  assert.ok(Math.abs(a - b) < eps, `${a} !~ ${b}`);
 
 test("sma uses a rolling window and NaN warm-up", () => {
   const out = sma([1, 2, 3, 4, 5], 3);
@@ -27,14 +28,23 @@ test("rsi is 100 on a pure uptrend, 0 on a pure downtrend and 50 when flat", () 
 });
 
 test("atr of constant-range candles equals the range", () => {
-  const candles: Candle[] = Array.from({ length: 20 }, (_, i) => ({ time: i, open: 10, high: 12, low: 10, close: 11 }));
+  const candles: Candle[] = Array.from({ length: 20 }, (_, i) => ({
+    time: i,
+    open: 10,
+    high: 12,
+    low: 10,
+    close: 11,
+  }));
   close(atr(candles, 14)[19], 2);
 });
 
 test("indicators are causal: truncating future data does not change earlier values", () => {
   const closes = Array.from({ length: 60 }, (_, i) => 100 + Math.sin(i / 3) * 5 + i * 0.1);
-  const full = rsi(closes), part = rsi(closes.slice(0, 40));
-  for (let i = 0; i < 40; i++) assert.ok(Object.is(full[i], part[i]) || Math.abs(full[i] - part[i]) < 1e-12);
+  const full = rsi(closes);
+  const part = rsi(closes.slice(0, 40));
+  for (let i = 0; i < 40; i++) {
+    assert.ok(Object.is(full[i], part[i]) || Math.abs(full[i] - part[i]) < 1e-12);
+  }
 });
 
 test("invalid periods return all NaN instead of throwing", () => {

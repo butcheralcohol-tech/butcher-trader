@@ -12,19 +12,25 @@ test("uses requested both-markets risk policy while locked to demo", () => {
 });
 
 test("live execution remains impossible from config flags alone", () => {
-  assert.equal(canEnableLiveTrading({
-    oauthImplemented: true,
-    demoOrdersVerified: true,
-    safetyReviewPassed: true,
-    explicitApproval: true,
-  }), false);
+  assert.equal(
+    canEnableLiveTrading({
+      oauthImplemented: true,
+      demoOrdersVerified: true,
+      safetyReviewPassed: true,
+      explicitApproval: true,
+    }),
+    false,
+  );
 });
 
 test("live execution remains locked if any prerequisite is missing", () => {
-  assert.equal(canEnableLiveTrading({
-    oauthImplemented: false,
-    demoOrdersVerified: true,
-    safetyReviewPassed: true,
-    explicitApproval: true,
-  }), false);
+  assert.equal(
+    canEnableLiveTrading({
+      oauthImplemented: false,
+      demoOrdersVerified: true,
+      safetyReviewPassed: true,
+      explicitApproval: true,
+    }),
+    false,
+  );
 });
