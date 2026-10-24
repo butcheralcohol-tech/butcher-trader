@@ -4,6 +4,7 @@ import { WebSocket } from "ws";
 import { OAUTH_COOKIE, decryptSession, parseCookies } from "../../shared/oauth-session.js";
 import { evaluateDemoExecutionRisk, type DemoAccount } from "../../shared/demo-execution.js";
 import { classifyAccount, otpEnvironment } from "../../shared/account-kind.js";
+import { computeRiskTotals, HISTORY_ROW_LIMIT, numberField, utcDayStart } from "../../shared/risk-accounting.js";
 import { evaluateRealExecutionRisk, isHalted, loadRealConfig, type RealConfig } from "../../shared/real-gate.js";
 
 /** Redis keys. HALT_KEY is a live kill switch: SET butcher:halt 1 stops every order immediately, no redeploy. */
@@ -177,43 +178,6 @@ async function brokerRequest(
   }
 }
 
-function todayStartUnix(): number {
-  const d = new Date();
-  d.setUTCHours(0, 0, 0, 0);
-  return Math.floor(d.getTime() / 1000);
-}
-
-function numberField(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))) return Number(value);
-  return null;
-}
-
-// The newer Deriv API names profit-table fields differently from the legacy one, so accept both forms.
-// Anything still unreadable stays null and the caller fails closed.
-function epochField(value: unknown): number | null {
-  const n = numberField(value);
-  if (n !== null) return n > 1e12 ? Math.floor(n / 1000) : n;
-  if (typeof value === "string") {
-    const ms = Date.parse(value);
-    if (Number.isFinite(ms)) return Math.floor(ms / 1000);
-  }
-  return null;
-}
-
-function normalizeTransaction(t: Record<string, unknown>): { sellTime: number | null; profit: number | null; symbol: string | null } {
-  const profit = numberField(t.profit) ?? (numberField(t.sell_price) !== null && numberField(t.buy_price) !== null
-    ? Number(t.sell_price) - Number(t.buy_price)
-    : null);
-  const direct = t.underlying ?? t.underlying_symbol ?? t.symbol;
-  const fromShortcode = typeof t.shortcode === "string" ? /^[A-Z]+_((?:1HZ\d+V|R_\d+|JD\d+|CRASH\d+N?|BOOM\d+N?|RDBEAR|RDBULL|stpRNG\d*|[A-Za-z0-9]+_[A-Za-z0-9]+))_/.exec(t.shortcode)?.[1] ?? null : null;
-  return {
-    sellTime: epochField(t.sell_time ?? t.sell_time_iso ?? t.close_time),
-    profit,
-    symbol: typeof direct === "string" && direct ? direct : fromShortcode,
-  };
-}
-
 export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -375,7 +339,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     const authReplies = await brokerRequest(session.accessToken, accountId, [
       { balance: 1 },
       { portfolio: 1 },
-      { profit_table: 1, description: 1, limit: 500, offset: 0, sort: "DESC" },
+      { profit_table: 1, description: 1, limit: HISTORY_ROW_LIMIT, offset: 0, sort: "DESC", date_from: String(Math.min(utcDayStart(Date.now()), Math.floor(Date.now() / 1000) - 4 * 3600)) },
     ], kind);
 
     const balanceReply = authReplies[0].balance as Record<string, unknown> | undefined;
@@ -398,22 +362,8 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     const openContracts = portfolio.portfolio.contracts.length;
 
     const profits = authReplies[2] as unknown as { profit_table?: { transactions?: Array<Record<string, unknown>> } };
-    const transactions = profits.profit_table?.transactions;
-    if (!Array.isArray(transactions)) throw new Error("Broker profit history is unavailable; fail closed.");
-    if (transactions.length >= 500) {
-      throw new Error("Broker history reached the query limit; risk totals may be incomplete, so orders are disabled.");
-    }
-    const normalized = transactions.map(normalizeTransaction);
-    if (normalized.some((t) => t.sellTime === null || t.profit === null || t.symbol === null)) {
-      throw new Error("Broker history is missing timestamps, P&L, or market identifiers; risk accounting is incomplete, so orders are disabled.");
-    }
-
-    const today = todayStartUnix();
-    const dailyNetPnl = normalized.reduce((sum, t) => (t.sellTime! >= today ? sum + t.profit! : sum), 0);
-    const marketNetPnl = normalized.reduce((sum, t) => (t.symbol === symbol && t.sellTime! >= today ? sum + t.profit! : sum), 0);
-
-    const sessionStart = Math.floor(Date.now() / 1000) - 4 * 60 * 60;
-    const sessionNetPnl = normalized.reduce((sum, t) => (t.sellTime! >= sessionStart ? sum + t.profit! : sum), 0);
+    const totals = computeRiskTotals(profits.profit_table?.transactions, symbol);
+    const { dailyNetPnl, marketNetPnl, sessionNetPnl } = totals;
 
     const configuredLoss = Number(process.env.DERIV_DAILY_LOSS_LIMIT_USD ?? 20);
     const configuredTarget = Number(process.env.DERIV_DAILY_PROFIT_TARGET_USD ?? 40);
