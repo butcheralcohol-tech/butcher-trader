@@ -57,13 +57,6 @@ async function releaseLock(key: string, owner: string): Promise<void> {
   ]);
 }
 
-/**
- * Opens an authenticated WebSocket to Deriv using the OTP-URL flow.
- *
- * Authentication is handled entirely by the Bearer token exchanged for the
- * OTP URL. For OAuth tokens the `Deriv-App-ID` header is optional; it is only
- * sent when a numeric app ID is configured (needed for PAT tokens).
- */
 async function brokerRequest(
   token: string,
   accountId: string,
@@ -176,13 +169,6 @@ function numberField(value: unknown): number | null {
   return null;
 }
 
-/**
- * Returns the P&L of a closed profit_table transaction.
- *
- * The current Deriv API exposes `sell_price` and `buy_price`. Older responses
- * also carried a `profit` field. We prefer `profit` when present (it is
- * already net of fees), otherwise fall back to `sell_price - buy_price`.
- */
 function transactionPnl(transaction: Record<string, unknown>): number | null {
   const direct = numberField(transaction.profit);
   if (direct !== null) return direct;
@@ -192,13 +178,6 @@ function transactionPnl(transaction: Record<string, unknown>): number | null {
   return sell - buy;
 }
 
-/**
- * Returns the close/settlement time of a transaction in Unix seconds.
- *
- * Current Deriv API uses `purchase_time`; some responses also expose
- * `sell_time`. We accept either so the reconciliation works across API
- * versions, and fall back to `purchase_time` when `sell_time` is absent.
- */
 function transactionTime(transaction: Record<string, unknown>): number | null {
   const sell = numberField(transaction.sell_time);
   if (sell !== null) return sell;
@@ -327,8 +306,6 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       throw new Error("Could not verify the broker balance and currency.");
     }
 
-    // Accept both demo prefixes: VRTC (classic) and DOT (current API).
-    // Real (CR) and wallet (CRW/VRW) accounts still fail this check.
     if (!/^(VRTC|DOT)\d+$/i.test(accountId)) {
       json(res, 403, { error: "This endpoint only permits broker-verified Deriv virtual accounts." });
       return;
@@ -351,9 +328,9 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       throw new Error("Broker history reached the query limit; risk totals may be incomplete, so demo orders are disabled.");
     }
 
-    // Validate each transaction has the fields we need, using the current
-    // Deriv schema (purchase_time, sell_price, buy_price) with a fallback to
-    // the legacy sell_time/profit fields.
+    // Temporary diagnostic: confirm the actual field names in the deployed response.
+    console.log("[trade] profit_table sample:", JSON.stringify(transactions.slice(0, 2)));
+
     if (transactions.some((transaction) =>
       transactionTime(transaction) === null ||
       transactionPnl(transaction) === null ||
