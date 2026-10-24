@@ -7,10 +7,19 @@ export async function POST(request: Request): Promise<Response> {
   try {
     body = await request.json();
   } catch {
-    return Response.json({ allowed: false, reasons: ["Request body must be valid JSON."], maxRiskAmount: 0 }, { status: 400 });
+    return Response.json(
+      { allowed: false, reasons: ["Request body must be valid JSON."], maxRiskAmount: 0 },
+      { status: 400 },
+    );
   }
+
   const parsed = parseRiskInput(body);
-  if (!parsed.ok) return Response.json({ allowed: false, reasons: parsed.reasons, maxRiskAmount: 0 }, { status: 400 });
+  if (!parsed.ok) {
+    return Response.json(
+      { allowed: false, reasons: parsed.reasons, maxRiskAmount: 0 },
+      { status: 400 },
+    );
+  }
 
   // Enforce fixed policy values server-side. The supplied balance and P&L are
   // still user-provided; this is a demo risk check, not broker-authoritative
@@ -24,17 +33,21 @@ export async function POST(request: Request): Promise<Response> {
     maxOpenPositions: TRADING_POLICY.maxOpenPositions,
     liveEnabled: false,
   });
-  return Response.json({
-    ...decision,
-    policy: {
-      accountMode: TRADING_POLICY.accountMode,
-      startingBalanceUsd: TRADING_POLICY.startingBalanceUsd,
-      riskPercent: TRADING_POLICY.riskPercent,
-      dailyLossLimitUsd: TRADING_POLICY.dailyLossLimitUsd,
-      dailyProfitTargetUsd: TRADING_POLICY.dailyProfitTargetUsd,
-      strategyMethod: TRADING_POLICY.strategyMethod,
-      liveTradingEnabled: false,
+
+  return Response.json(
+    {
+      ...decision,
+      policy: {
+        accountMode: TRADING_POLICY.accountMode,
+        startingBalanceUsd: TRADING_POLICY.startingBalanceUsd,
+        riskPercent: TRADING_POLICY.riskPercent,
+        dailyLossLimitUsd: TRADING_POLICY.dailyLossLimitUsd,
+        dailyProfitTargetUsd: TRADING_POLICY.dailyProfitTargetUsd,
+        strategyMethod: TRADING_POLICY.strategyMethod,
+        liveTradingEnabled: false,
+      },
+      note: "Demo pre-trade check only. Balance/P&L are not broker-verified, and this endpoint does not authorize or place broker orders.",
     },
-    note: "Demo pre-trade check only. Balance/P&L are not broker-verified, and this endpoint does not authorize or place broker orders.",
-  }, { status: decision.allowed ? 200 : 423 });
+    { status: decision.allowed ? 200 : 423 },
+  );
 }
