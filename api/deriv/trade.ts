@@ -176,6 +176,40 @@ function numberField(value: unknown): number | null {
   return null;
 }
 
+/**
+ * Returns the P&L of a closed profit_table transaction.
+ *
+ * The current Deriv API exposes `sell_price` and `buy_price`. Older responses
+ * also carried a `profit` field. We prefer `profit` when present (it is
+ * already net of fees), otherwise fall back to `sell_price - buy_price`.
+ */
+function transactionPnl(transaction: Record<string, unknown>): number | null {
+  const direct = numberField(transaction.profit);
+  if (direct !== null) return direct;
+  const sell = numberField(transaction.sell_price);
+  const buy = numberField(transaction.buy_price);
+  if (sell === null || buy === null) return null;
+  return sell - buy;
+}
+
+/**
+ * Returns the close/settlement time of a transaction in Unix seconds.
+ *
+ * Current Deriv API uses `purchase_time`; some responses also expose
+ * `sell_time`. We accept either so the reconciliation works across API
+ * versions, and fall back to `purchase_time` when `sell_time` is absent.
+ */
+function transactionTime(transaction: Record<string, unknown>): number | null {
+  const sell = numberField(transaction.sell_time);
+  if (sell !== null) return sell;
+  return numberField(transaction.purchase_time);
+}
+
+function transactionMarket(transaction: Record<string, unknown>): string {
+  const value = transaction.underlying ?? transaction.symbol ?? transaction.display_name ?? "";
+  return typeof value === "string" ? value : "";
+}
+
 export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -316,41 +350,43 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     if (transactions.length >= 500) {
       throw new Error("Broker history reached the query limit; risk totals may be incomplete, so demo orders are disabled.");
     }
+
+    // Validate each transaction has the fields we need, using the current
+    // Deriv schema (purchase_time, sell_price, buy_price) with a fallback to
+    // the legacy sell_time/profit fields.
     if (transactions.some((transaction) =>
-      numberField(transaction.sell_time) === null ||
-      numberField(transaction.profit) === null ||
-      typeof (transaction.underlying ?? transaction.symbol) !== "string"
+      transactionTime(transaction) === null ||
+      transactionPnl(transaction) === null ||
+      transactionMarket(transaction) === ""
     )) {
       throw new Error("Broker history is missing timestamps, P&L, or market identifiers; risk accounting is incomplete, so demo orders are disabled.");
     }
 
     const today = todayStartUnix();
     const dailyNetPnl = transactions.reduce((sum, transaction) => {
-      const sellTime = numberField(transaction.sell_time);
-      const profit = numberField(transaction.profit);
-      return sellTime !== null && sellTime >= today && profit !== null ? sum + profit : sum;
+      const time = transactionTime(transaction);
+      const pnl = transactionPnl(transaction);
+      return time !== null && time >= today && pnl !== null ? sum + pnl : sum;
     }, 0);
 
-    const marketTransactions = transactions.filter((transaction) =>
-      String(transaction.underlying ?? transaction.symbol ?? "") === symbol
-    );
+    const marketTransactions = transactions.filter((transaction) => transactionMarket(transaction) === symbol);
     if (marketTransactions.some((transaction) =>
-      numberField(transaction.sell_time) === null || numberField(transaction.profit) === null
+      transactionTime(transaction) === null || transactionPnl(transaction) === null
     )) {
       throw new Error("Market-specific broker history is incomplete; demo orders are disabled.");
     }
 
     const marketNetPnl = marketTransactions.reduce((sum, transaction) => {
-      const sellTime = numberField(transaction.sell_time);
-      const profit = numberField(transaction.profit);
-      return sellTime !== null && sellTime >= today && profit !== null ? sum + profit : sum;
+      const time = transactionTime(transaction);
+      const pnl = transactionPnl(transaction);
+      return time !== null && time >= today && pnl !== null ? sum + pnl : sum;
     }, 0);
 
     const sessionStart = Math.floor(Date.now() / 1000) - 4 * 60 * 60;
     const sessionNetPnl = transactions.reduce((sum, transaction) => {
-      const sellTime = numberField(transaction.sell_time);
-      const profit = numberField(transaction.profit);
-      return sellTime !== null && sellTime >= sessionStart && profit !== null ? sum + profit : sum;
+      const time = transactionTime(transaction);
+      const pnl = transactionPnl(transaction);
+      return time !== null && time >= sessionStart && pnl !== null ? sum + pnl : sum;
     }, 0);
 
     const configuredLoss = Number(process.env.DERIV_DAILY_LOSS_LIMIT_USD ?? 20);
