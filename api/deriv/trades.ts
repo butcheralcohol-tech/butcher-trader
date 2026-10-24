@@ -1,3 +1,4 @@
+import { classifyAccount } from "../../shared/account-kind.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { WebSocket } from "ws";
 import { OAUTH_COOKIE, decryptSession, parseCookies } from "../../shared/oauth-session.js";
@@ -189,25 +190,33 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
   }
 
   const requestUrl = new URL(req.url ?? "/", "https://internal.invalid");
-  const accountId = requestUrl.searchParams.get("accountId")?.trim() ?? "";
+  const accountId = (requestUrl.searchParams.get("accountId")?.trim() ?? "").toUpperCase();
   if (!accountId || !/^[A-Z]{2,4}\d+$/i.test(accountId)) {
     sendJson(res, 400, { error: "A valid accountId is required." });
     return;
   }
 
-  if (!/^VRTC\d+$/i.test(accountId)) {
-    sendJson(res, 403, { error: "Only a broker-verified Deriv virtual account can use this endpoint." });
+  const kind = classifyAccount(accountId);
+  if (kind === "unsupported") {
+    sendJson(res, 403, { error: "Only demo and real trading accounts have an order ledger (wallets are not supported)." });
     return;
   }
 
   try {
     const snapshot = await brokerSnapshot(session.accessToken, accountId);
 
-    const prefix = "butcher:demo:" + accountId + ":contract:";
-    const scan = await redisCommand<[string, string[]]>([
-      "SCAN", "0", "MATCH", prefix + "*", "COUNT", "100",
-    ]);
-    const keys = Array.isArray(scan?.[1]) ? scan[1] : [];
+    const prefix = "butcher:" + kind + ":" + accountId + ":contract:";
+    // SCAN returns pages; follow the cursor (bounded) so older orders are not silently dropped from reconciliation.
+    const keys: string[] = [];
+    let cursor = "0";
+    for (let page = 0; page < 50; page++) {
+      const scan = await redisCommand<[string, string[]]>(["SCAN", cursor, "MATCH", prefix + "*", "COUNT", "200"]);
+      if (!scan || !Array.isArray(scan[1])) throw new Error("Order records could not be listed; reconciliation cannot be confirmed.");
+      keys.push(...scan[1]);
+      cursor = String(scan[0]);
+      if (cursor === "0") break;
+    }
+    if (cursor !== "0") throw new Error("Too many order records to reconcile in one request.");
 
     const stored: StoredOrder[] = [];
     for (const key of keys) {
@@ -268,10 +277,10 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
 
     sendJson(res, 200, {
       account: accountId,
-      accountMode: "demo",
+      accountMode: kind,
       trades,
       brokerHistoryCheckedAt: new Date().toISOString(),
-      liveTradingEnabled: false,
+      liveTradingEnabled: kind === "real",
     });
   } catch (error) {
     sendJson(res, 503, {

@@ -1,3 +1,5 @@
+import AccountPicker from "./AccountPicker";
+import { useDerivAccounts } from "../lib/derivAccounts";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowDownRight, ArrowUpRight, CircleStop, Radio, ShieldCheck } from "lucide-react";
 import { GRANULARITIES } from "../../shared/candles.js";
@@ -35,6 +37,7 @@ export default function ManualTrading() {
   const [barrier, setBarrier] = useState("6");
   const [takeProfit, setTakeProfit] = useState("");
   const [stopLoss, setStopLoss] = useState("");
+  const acct = useDerivAccounts();
   const [brokerBusy, setBrokerBusy] = useState(false);
   const [brokerMessage, setBrokerMessage] = useState("Connect a Deriv virtual account before placing demo orders.");
   const [brokerOrders, setBrokerOrders] = useState<Array<Record<string, unknown>>>([]);
@@ -45,8 +48,9 @@ export default function ManualTrading() {
   const [discoveryMessage, setDiscoveryMessage] = useState("Connect Deriv to load market-specific contract availability.");
   useEffect(() => {
     let active = true;
+    if (!acct.selected) { setDiscoveredContracts([]); setDiscoveryMessage("Select a Deriv trading account to load contract availability."); return; }
     setDiscoveryMessage("Checking Deriv contract availability…");
-    fetch(`/api/deriv/contracts?symbol=${encodeURIComponent(symbol)}`, { credentials: "same-origin", cache: "no-store" })
+    fetch(`/api/deriv/contracts?symbol=${encodeURIComponent(symbol)}&accountId=${encodeURIComponent(acct.selected.id)}`, { credentials: "same-origin", cache: "no-store" })
       .then(async response => {
         const data = await response.json() as { error?: string; contracts?: DiscoveredContract[] };
         if (!response.ok) throw new Error(data.error || "Contract discovery is unavailable.");
@@ -64,12 +68,13 @@ export default function ManualTrading() {
         setDiscoveryMessage(error instanceof Error ? error.message : "Contract discovery failed.");
       });
     return () => { active = false; };
-  }, [symbol]);
+  }, [symbol, acct.selected?.id]);
   const supportedDiscoveredContracts = discoveredContracts.filter(item => BROKER_CONTRACTS.some(c => c.value === item.contractType));
   const selectedContract = BROKER_CONTRACTS.find(c => c.value === contractType) ?? BROKER_CONTRACTS[0];
   const refreshBrokerOrders = async () => {
+    if (!acct.selected) { setBrokerMessage("Select a Deriv trading account first."); return; }
     try {
-      const response = await fetch("/api/deriv/trades", { credentials: "same-origin", cache: "no-store" });
+      const response = await fetch(`/api/deriv/trades?accountId=${encodeURIComponent(acct.selected.id)}`, { credentials: "same-origin", cache: "no-store" });
       const data = await response.json() as { error?: string; account?: string; trades?: Array<Record<string, unknown>> };
       if (!response.ok) throw new Error(data.error || "Could not reconcile broker history.");
       setBrokerAccount(data.account || "");
@@ -81,15 +86,16 @@ export default function ManualTrading() {
   };
   const placeBrokerOrder = async () => {
     if (brokerBusy || !Number.isFinite(brokerStake) || brokerStake <= 0) return;
+    if (!acct.orderFields) { setBrokerMessage("Select a Deriv trading account first."); return; }
     setBrokerBusy(true);
-    setBrokerMessage("Submitting demo proposal to Deriv; waiting for broker confirmation…");
+    setBrokerMessage(`Submitting ${acct.selected?.kind === "real" ? "REAL-MONEY" : "demo"} proposal to Deriv; waiting for broker confirmation…`);
     try {
       const idempotencyKey = globalThis.crypto?.randomUUID?.() || `bt_${Date.now()}_${Math.random().toString(36).slice(2)}`;
       const response = await fetch("/api/deriv/trade", {
         method: "POST", credentials: "same-origin",
         headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
         body: JSON.stringify({
-          symbol, contractType, duration, durationUnit: selectedContract.unit === "t" ? "t" : durationUnit, stake: brokerStake,
+          ...acct.orderFields, symbol, contractType, duration, durationUnit: selectedContract.unit === "t" ? "t" : durationUnit, stake: brokerStake,
           ...(selectedContract.barrier ? { barrier } : {}),
           ...(selectedContract.limits ? {
             ...(takeProfit.trim() ? { takeProfit: Number(takeProfit) } : {}),
@@ -99,7 +105,7 @@ export default function ManualTrading() {
       });
       const data = await response.json() as { error?: string; reasons?: string[]; contractId?: number; status?: string; account?: string; stake?: number; currency?: string; liveTradingEnabled?: boolean };
       if (!response.ok) throw new Error([data.error, ...(data.reasons || [])].filter(Boolean).join(" "));
-      setBrokerMessage(`Deriv confirmed demo contract #${data.contractId} · ${data.stake} ${data.currency} · status ${data.status}.`);
+      setBrokerMessage(`Deriv confirmed ${acct.selected?.kind === "real" ? "REAL" : "demo"} contract #${data.contractId} · ${data.stake} ${data.currency} · status ${data.status}.`);
       setBrokerAccount(data.account || "");
       await refreshBrokerOrders();
     } catch (error) {
@@ -128,7 +134,8 @@ export default function ManualTrading() {
     <div className="section-heading"><div><div className="eyebrow">05 / MANUAL EXECUTION PRACTICE</div><h3>Manual trading desk</h3></div><span className="safe-label"><ShieldCheck size={14} /> VIRTUAL ORDERS ONLY</span></div>
     <section className="panel">
       <div className="card-title"><b>Deriv broker orders</b><span className="card-status">VIRTUAL ACCOUNT ONLY</span></div>
-      <p className="hint">These controls submit contracts only to an authenticated Deriv virtual account. The server validates the account, stake risk, daily locks, open-contract limits and duplicate-request protection. Availability depends on the selected market and Deriv contract rules.</p>
+      <AccountPicker />
+      <p className="hint">These controls submit contracts to the Deriv account selected above (demo by default). The server validates the account, stake risk, daily locks, open-contract limits and duplicate-request protection. Availability depends on the selected market and Deriv contract rules.</p>
       <p className="hint" role="status">{discoveryMessage}</p>
       {discoveredContracts.length > 0 && <details className="contract-discovery"><summary>View broker-discovered contract types ({discoveredContracts.length})</summary><div className="table-wrap"><table><thead><tr><th>Type</th><th>Category</th><th>Duration range</th></tr></thead><tbody>{discoveredContracts.map(contract => <tr key={contract.contractType}><td>{contract.label} <small>({contract.contractType})</small></td><td>{contract.category || "—"}</td><td>{String(contract.minDuration ?? "—")} – {String(contract.maxDuration ?? "—")}</td></tr>)}</tbody></table></div></details>}
       <div className="fields four">
@@ -141,7 +148,7 @@ export default function ManualTrading() {
         {selectedContract.limits && <label>Stop-loss amount ($, optional)<input type="number" min="0.01" step="0.01" value={stopLoss} disabled={brokerBusy} placeholder="No stop loss" onChange={e => setStopLoss(e.target.value)} /></label>}
       </div>
       <div className="manual-actions">
-        <button className="manual-buy" disabled={brokerBusy || !Number.isFinite(brokerStake) || brokerStake <= 0 || (selectedContract.barrier && !/^[0-9]$/.test(barrier)) || (takeProfit !== "" && (!Number.isFinite(Number(takeProfit)) || Number(takeProfit) <= 0)) || (stopLoss !== "" && (!Number.isFinite(Number(stopLoss)) || Number(stopLoss) <= 0))} onClick={placeBrokerOrder}>{brokerBusy ? "Submitting…" : `Place demo ${selectedContract.label} contract`}</button>
+        <button className="manual-buy" disabled={brokerBusy || !acct.selected || (acct.selected.kind === "real" && !acct.realConfirmed) || !Number.isFinite(brokerStake) || brokerStake <= 0 || (selectedContract.barrier && !/^[0-9]$/.test(barrier)) || (takeProfit !== "" && (!Number.isFinite(Number(takeProfit)) || Number(takeProfit) <= 0)) || (stopLoss !== "" && (!Number.isFinite(Number(stopLoss)) || Number(stopLoss) <= 0))} onClick={placeBrokerOrder}>{brokerBusy ? "Submitting…" : `Place demo ${selectedContract.label} contract`}</button>
       </div>
       {selectedContract.limits && <p className="hint">Take-profit and stop-loss are sent as broker limit-order parameters. If Deriv rejects them for this contract or market, the order will fail closed; do not assume protection until the broker confirms it.</p>}
       <p className="hint" role="status">{brokerMessage}{brokerAccount ? ` · Account ${brokerAccount}` : ""}</p>
@@ -172,6 +179,6 @@ export default function ManualTrading() {
     <section className="panel"><div className="card-title"><ShieldCheck size={17} /><b>Closed virtual trades</b><span className="card-status">{history.length} RECORDED</span></div>
       <div className="table-wrap"><table><thead><tr><th>Side</th><th>Entry</th><th>Exit</th><th>Stake</th><th>Simulated P&amp;L</th></tr></thead><tbody>{history.map((t, i) => <tr key={t.openedAt + "-" + i}><td><span className={t.side === "LONG" ? "tag filled" : "tag blocked"}>{t.side}</span></td><td>{fmt(t.entry)}</td><td>{fmt(t.exit)}</td><td>{money(t.stake)}</td><td className={t.pnl >= 0 ? "up" : "down"}>{signedMoney(t.pnl)}</td></tr>)}{!history.length && <tr><td colSpan={5}>No closed virtual trades yet.</td></tr>}</tbody></table></div>
     </section>
-    <section className="warning-note"><b>Real-money trading remains disabled</b><p>Only virtual-account orders are allowed. The contract menu is a limited initial set, not every Deriv contract type. Broker support, proposal acceptance, TP/SL behavior and settlement reconciliation must be verified in demo before expanding coverage.</p></section>
+    <section className="warning-note"><b>Real-money orders are locked by default</b><p>Demo orders work immediately. A real account is refused unless the server owner enabled it for that exact account, enough demo orders were confirmed, and you typed the confirmation phrase. The contract menu is a limited initial set, not every Deriv contract type. Broker support, proposal acceptance, TP/SL behavior and settlement reconciliation must be verified in demo before expanding coverage.</p></section>
   </div>;
 }

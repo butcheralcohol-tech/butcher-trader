@@ -88,3 +88,18 @@ Research starter, not financial advice or a profitable-strategy claim. Risk limi
 - Test coverage added for the pure demo execution risk gate: non-demo accounts, >1% stake, daily loss/profit locks, concurrent contracts, and non-finite broker data.
 - **Not yet live-verified:** repository tests/build, OAuth token authorization against the currently registered Deriv app, live broker proposal/buy/settlement, Upstash integration, and production deployment. The code must pass CI and be exercised on a Deriv virtual account before calling this milestone verified.
 - Real-money trading remains hard-disabled. The $40 target is aspirational and is not a promise of profit. The $20 limit is an entry lock based on returned broker history; it cannot guarantee losses never exceed the limit, especially while a contract remains open or broker data is delayed.
+
+## Real-money execution (off by default)
+
+Demo accounts (`VRTC…`) trade with the normal risk rules. Real accounts (`CR…`) are refused unless **all** of these hold:
+
+1. `ALLOW_REAL_TRADING=I_ACCEPT_REAL_MONEY_LOSSES` on the server
+2. the account is in `REAL_ACCOUNT_ALLOWLIST`
+3. `REAL_MAX_STAKE` and `REAL_DAILY_LOSS_LIMIT` are set
+4. at least `REAL_MIN_DEMO_ORDERS` (30+) demo orders were confirmed
+5. the dashboard user types `TRADE REAL MONEY`
+6. stake ≤ min(1% of balance, `REAL_MAX_STAKE`), daily loss ≤ min(`REAL_DAILY_LOSS_LIMIT`, 3% of balance), and no contract already open
+
+Kill switches: `TRADING_HALTED=true` (env) or the Redis key `butcher:halt`. Wallet accounts are unsupported. Trading carries real risk of loss; run demo for weeks first.
+
+The **Broker trades** view lists real and demo contracts with a mode badge.

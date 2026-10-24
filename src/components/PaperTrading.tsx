@@ -1,3 +1,6 @@
+import AccountPicker from "./AccountPicker";
+import { useDerivAccounts } from "../lib/derivAccounts";
+import { latestEventTime, newRobotOrders } from "../../shared/robot-signals.js";
 import { useEffect, useRef, useState } from "react";
 import { Download, Play, RotateCcw, ScrollText } from "lucide-react";
 import { GRANULARITIES } from "../../shared/candles.js";
@@ -30,39 +33,42 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
   const [brokerExecution, setBrokerExecution] = useState(false);
   const [brokerStake, setBrokerStake] = useState(2);
   const [brokerExecutionMessage, setBrokerExecutionMessage] = useState("Off — robot trades are paper-only until demo execution is explicitly enabled.");
-  const processedEventCount = useRef(0);
+  const acct = useDerivAccounts();
+  const orderFieldsRef = useRef(acct.orderFields);
+  orderFieldsRef.current = acct.orderFields; // always the latest selection, without re-running the effect below
+  // Candle time of the newest paper fill already handled. Only fills after this are mirrored, so arming never replays history.
+  const handledUpTo = useRef(0);
+  const sending = useRef(false);
 
   useEffect(() => {
     const events = session?.state.events ?? [];
-    const newEvents = events.slice(processedEventCount.current);
-    processedEventCount.current = events.length;
-    if (!brokerExecution || !session || !newEvents.length) return;
-    const fills = newEvents.map((event, index) => ({ event, index })).filter(({ event }) => event.type === "FILLED");
-    if (!fills.length) return;
-    let cancelled = false;
-    const execute = async () => {
-      for (const { event, index } of fills) {
-        if (cancelled) return;
-        const contractType = /PAPER LONG/.test(event.message) ? "CALL" : /PAPER SHORT/.test(event.message) ? "PUT" : null;
-        if (!contractType) continue;
-        setBrokerExecutionMessage(`Sending robot ${contractType} signal to Deriv demo account…`);
-        try {
-          const key = `robot_${session.meta.startedAt}_${event.time}_${processedEventCount.current - newEvents.length + index}`;
-          const response = await fetch("/api/deriv/trade", {
-            method: "POST", credentials: "same-origin",
-            headers: { "Content-Type": "application/json", "Idempotency-Key": key },
-            body: JSON.stringify({ symbol: session.meta.symbol, contractType, duration: 1, durationUnit: "m", stake: brokerStake }),
-          });
-          const data = await response.json() as { error?: string; reasons?: string[]; contractId?: number; status?: string; account?: string; stake?: number; currency?: string };
-          if (!response.ok) throw new Error([data.error, ...(data.reasons || [])].filter(Boolean).join(" "));
-          setBrokerExecutionMessage(`Deriv confirmed robot contract #${data.contractId} · ${data.stake} ${data.currency} · ${data.status}.`);
-        } catch (error) {
-          setBrokerExecutionMessage(error instanceof Error ? `Robot order blocked/failed: ${error.message}` : "Robot order failed; check broker history before retrying.");
+    if (!brokerExecution || !session || sending.current) return;
+    const fields = orderFieldsRef.current;
+    if (!fields) { setBrokerExecutionMessage("No Deriv account selected; robot orders are paused."); return; }
+    const orders = newRobotOrders(events, handledUpTo.current, session.meta.startedAt, session.meta.symbol);
+    if (!orders.length) return;
+    handledUpTo.current = Math.max(...orders.map(o => o.time)); // advance first: an order is never sent twice from this page
+    sending.current = true;
+    const { symbol } = session.meta;
+    void (async () => {
+      try {
+        for (const order of orders) {
+          setBrokerExecutionMessage(`Sending robot ${order.contractType} signal to Deriv ${fields.accountId}…`);
+          try {
+            const response = await fetch("/api/deriv/trade", {
+              method: "POST", credentials: "same-origin",
+              headers: { "Content-Type": "application/json", "Idempotency-Key": order.idempotencyKey },
+              body: JSON.stringify({ ...fields, symbol, contractType: order.contractType, duration: 1, durationUnit: "m", stake: brokerStake }),
+            });
+            const data = await response.json() as { error?: string; reasons?: string[]; contractId?: number; status?: string; stake?: number; currency?: string; mode?: string; noRetryUntilReconciled?: boolean };
+            if (!response.ok) throw new Error([data.error, ...(data.reasons || [])].filter(Boolean).join(" ") + (data.noRetryUntilReconciled ? " Check the Trades tab before trusting this order." : ""));
+            setBrokerExecutionMessage(`Deriv confirmed ${data.mode === "real" ? "REAL" : "demo"} robot contract #${data.contractId} · ${data.stake} ${data.currency} · ${data.status}.`);
+          } catch (error) {
+            setBrokerExecutionMessage(error instanceof Error ? `Robot order blocked/failed: ${error.message}` : "Robot order failed; check broker history before retrying.");
+          }
         }
-      }
-    };
-    void execute();
-    return () => { cancelled = true; };
+      } finally { sending.current = false; }
+    })();
   }, [session?.state.events, session?.meta.startedAt, session?.meta.symbol, brokerExecution, brokerStake]);
 
   const begin = () => {
@@ -135,11 +141,12 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
       </section>
       <p className="hint">Enabled modules: {activeStrategies.join(" · ")}. {meta.consensusPercent ?? 60}% consensus required. {info.message}{info.lastDataAt ? ` Last data ${clockSeconds(info.lastDataAt)}.` : " "}The bot only runs while this page is open; session state is stored in this browser. All trades remain simulated.</p>
       <section className="panel manual-trading">
-        <div className="card-title"><b>Deriv demo robot execution</b><span className="card-status">DEMO ONLY · LIVE DISABLED</span></div>
-        <p className="hint">When enabled, each newly risk-approved paper-bot entry signal is mirrored as a Deriv virtual CALL/PUT contract. Broker-side risk checks still decide whether the order is allowed. This does not mirror paper exits; check broker-confirmed history for settlement. Never enable this unless you are connected to a Deriv virtual account.</p>
+        <div className="card-title"><b>Deriv demo robot execution</b><span className="card-status">{acct.selected?.kind === "real" ? "REAL ACCOUNT SELECTED" : "DEMO BY DEFAULT · REAL LOCKED"}</span></div>
+        <p className="hint">When enabled, each newly risk-approved paper-bot entry signal is mirrored as a Deriv virtual CALL/PUT contract. Broker-side risk checks still decide whether the order is allowed. This does not mirror paper exits; check broker-confirmed history for settlement. Orders go to the account selected above (demo unless you choose a real one). Real orders also need the server-side gates and the typed confirmation.</p>
+        <AccountPicker />
         <div className="fields four">
-          <label>Broker demo stake ($)<input type="number" min="0.01" step="0.01" value={brokerStake} disabled={brokerExecution} onChange={e => setBrokerStake(Number(e.target.value))} /></label>
-          <label className="bot-mode"><input type="checkbox" checked={brokerExecution} onChange={e => { setBrokerExecution(e.target.checked); setBrokerExecutionMessage(e.target.checked ? "Armed for new paper-bot fills. Existing signals will not be replayed." : "Off — no new robot orders will be sent."); }} /> Enable broker demo orders</label>
+          <label>Broker stake ($)<input type="number" min="0.01" step="0.01" value={brokerStake} disabled={brokerExecution} onChange={e => setBrokerStake(Number(e.target.value))} /></label>
+          <label className="bot-mode"><input type="checkbox" checked={brokerExecution} disabled={!acct.selected || (acct.selected.kind === "real" && !acct.realConfirmed)} onChange={e => { if (e.target.checked) handledUpTo.current = latestEventTime(session?.state.events ?? []); setBrokerExecution(e.target.checked); setBrokerExecutionMessage(e.target.checked ? "Armed for new paper-bot fills. Existing signals will not be replayed." : "Off — no new robot orders will be sent."); }} /> Enable broker orders</label>
         </div>
         <p className="hint" role="status">{brokerExecutionMessage}</p>
       </section>
@@ -166,6 +173,6 @@ export default function PaperTrading({ paper }: { paper: Paper }) {
       <div className="table-wrap tall"><table><thead><tr><th>Candle time</th><th>Event</th><th>Detail</th></tr></thead>
         <tbody>{[...state.events].reverse().slice(0, 120).map((e, i) => <tr key={i}><td>{clock(e.time)}</td><td><span className={`tag ${e.type.toLowerCase()}`}>{e.type.replace("_", " ")}</span></td><td>{e.message}</td></tr>)}
           {!state.events.length && <tr><td colSpan={3}>No events yet.</td></tr>}</tbody></table></div></section>
-    <section className="warning-note"><b>Execution status</b><p>The strategy ensemble always maintains a simulated paper portfolio. If “Enable broker demo orders” is armed, each new paper entry fill also requests a separate Deriv virtual CALL/PUT contract through the server-side order gate. The broker contract is independent of paper exits; monitor broker-confirmed history and reconcile any timeout before retrying. Production credentials, durable storage, Deriv OAuth and live broker proposal/buy/settlement still require integration testing. Real-money execution remains disabled. A session loss cap blocks new entries but cannot guarantee a maximum loss while contracts remain open or prices gap. Never treat paper fills as broker fills.</p></section>
+    <section className="warning-note"><b>Execution status</b><p>The strategy ensemble always maintains a simulated paper portfolio. If “Enable broker orders” is armed, each new paper entry fill also requests a separate Deriv virtual CALL/PUT contract through the server-side order gate. The broker contract is independent of paper exits; monitor broker-confirmed history and reconcile any timeout before retrying. Production credentials, durable storage, Deriv OAuth and live broker proposal/buy/settlement still require integration testing. Real-money orders are locked by default and need server-side enablement, a real-account allowlist, enough confirmed demo orders and a typed confirmation. A session loss cap blocks new entries but cannot guarantee a maximum loss while contracts remain open or prices gap. Never treat paper fills as broker fills.</p></section>
   </div>;
 }

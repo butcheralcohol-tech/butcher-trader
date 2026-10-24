@@ -3,6 +3,14 @@ import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
 import { OAUTH_COOKIE, decryptSession, parseCookies } from "../../shared/oauth-session.js";
 import { evaluateDemoExecutionRisk, type DemoAccount } from "../../shared/demo-execution.js";
+import { classifyAccount, otpEnvironment } from "../../shared/account-kind.js";
+import { computeRiskTotals, HISTORY_ROW_LIMIT, numberField, utcDayStart } from "../../shared/risk-accounting.js";
+import { evaluateRealExecutionRisk, isHalted, loadRealConfig, type RealConfig } from "../../shared/real-gate.js";
+
+/** Redis keys. HALT_KEY is a live kill switch: SET butcher:halt 1 stops every order immediately, no redeploy. */
+const HALT_KEY = "butcher:halt";
+/** Count of broker-confirmed demo orders; real-money orders require a minimum (see shared/real-gate.ts). */
+const DEMO_COUNTER_KEY = "butcher:demo-confirmed-orders";
 
 type DerivReply = {
   req_id?: number;
@@ -44,7 +52,7 @@ async function redisCommand<T>(command: (string | number)[]): Promise<T | null> 
 
 async function acquireLock(key: string): Promise<string | null> {
   const owner = randomUUID();
-  return (await redisCommand<string>(["SET", key, owner, "NX", "EX", 120])) === "OK" ? owner : null;
+  return (await redisCommand<string>(["SET", key, owner, "NX", "EX", 180])) === "OK" ? owner : null;
 }
 
 async function releaseLock(key: string, owner: string): Promise<void> {
@@ -70,6 +78,7 @@ async function brokerRequest(
   token: string,
   accountId: string,
   payloads: Record<string, unknown>[],
+  expectedEnv: "demo" | "real",
 ): Promise<DerivReply[]> {
   const appId = process.env.DERIV_APP_ID?.trim();
   if (!appId || !/^\d+$/.test(appId)) {
@@ -97,6 +106,10 @@ async function brokerRequest(
   const wsUrl = otpPayload.data?.url;
   if (!wsUrl || !wsUrl.startsWith("wss://")) {
     throw new Error("Deriv OTP response did not contain a secure WebSocket URL.");
+  }
+  // The broker-issued URL says which environment this account lives in. It must match what we think we are trading.
+  if (otpEnvironment(wsUrl) !== expectedEnv) {
+    throw new Error("Deriv issued a session for a different environment than expected; no order was sent.");
   }
 
   const ws = new WebSocket(wsUrl);
@@ -165,18 +178,6 @@ async function brokerRequest(
   }
 }
 
-function todayStartUnix(): number {
-  const d = new Date();
-  d.setUTCHours(0, 0, 0, 0);
-  return Math.floor(d.getTime() / 1000);
-}
-
-function numberField(value: unknown): number | null {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))) return Number(value);
-  return null;
-}
-
 export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
@@ -184,11 +185,16 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     return;
   }
 
+  if (isHalted(process.env)) {
+    json(res, 423, { error: "Trading is halted by the server kill switch (TRADING_HALTED).", liveTradingEnabled: false });
+    return;
+  }
+
   const secret = process.env.SESSION_SECRET ?? "";
   const cookies = parseCookies(typeof req.headers.cookie === "string" ? req.headers.cookie : null);
   const session = decryptSession(cookies[OAUTH_COOKIE], secret);
   if (!session) {
-    json(res, 401, { error: "Connect Deriv again before placing a demo order." });
+    json(res, 401, { error: "Connect Deriv again before placing an order." });
     return;
   }
 
@@ -224,9 +230,15 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     }
   }
 
-  const accountId = typeof body.accountId === "string" ? body.accountId.trim() : "";
+  const accountId = typeof body.accountId === "string" ? body.accountId.trim().toUpperCase() : "";
   if (!accountId || !/^[A-Z]{2,4}\d+$/i.test(accountId)) {
     json(res, 400, { error: "A valid accountId is required." });
+    return;
+  }
+
+  const kind = classifyAccount(accountId);
+  if (kind === "unsupported") {
+    json(res, 403, { error: "This account type cannot place Options orders (wallets and unknown accounts are refused)." });
     return;
   }
 
@@ -282,14 +294,53 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     return;
   }
 
-  let account: DemoAccount | null = null;
+  // Real money: refuse early and loudly unless the server owner has deliberately enabled it for this exact account.
+  let realConfig: RealConfig | null = null;
+  if (kind === "real") {
+    const loaded = loadRealConfig(process.env);
+    if (!loaded.ok) {
+      json(res, 403, { error: "Real-money trading is disabled.", reasons: loaded.reasons, liveTradingEnabled: false });
+      return;
+    }
+    if (!loaded.config.allowlist.includes(accountId)) {
+      json(res, 403, { error: "This real account is not on the allowlist.", liveTradingEnabled: false });
+      return;
+    }
+    realConfig = loaded.config;
+  }
+
+  const storagePrefix = `butcher:${kind}:${accountId}`;
+  let lock: { key: string; owner: string } | null = null;
+  let buySent = false; // once true, any failure means the broker may hold a contract we have not confirmed
 
   try {
+    if (await redisCommand<string>(["GET", HALT_KEY])) {
+      json(res, 423, { error: "Trading is halted (butcher:halt is set).", liveTradingEnabled: false });
+      return;
+    }
+
+    const idempotencyKey = storagePrefix + ":idempotency:" + requestId;
+    const previous = await redisCommand<string>(["GET", idempotencyKey]);
+    if (previous) {
+      json(res, 409, { ...JSON.parse(previous), replayed: true, message: "This request key was already used; reconcile broker history before retrying." });
+      return;
+    }
+
+    // The lock is taken BEFORE any risk check. Otherwise two near-simultaneous requests (robot + manual desk) could
+    // both pass "no open contract" and "daily loss" on stale data and both buy.
+    const lockKey = storagePrefix + ":execution-lock";
+    const lockOwner = await acquireLock(lockKey);
+    if (!lockOwner) {
+      json(res, 423, { error: "Another order is being processed. Reconcile order history before retrying." });
+      return;
+    }
+    lock = { key: lockKey, owner: lockOwner };
+
     const authReplies = await brokerRequest(session.accessToken, accountId, [
       { balance: 1 },
       { portfolio: 1 },
-      { profit_table: 1, description: 1, limit: 500, offset: 0, sort: "DESC" },
-    ]);
+      { profit_table: 1, description: 1, limit: HISTORY_ROW_LIMIT, offset: 0, sort: "DESC", date_from: String(Math.min(utcDayStart(Date.now()), Math.floor(Date.now() / 1000) - 4 * 3600)) },
+    ], kind);
 
     const balanceReply = authReplies[0].balance as Record<string, unknown> | undefined;
     const brokerBalance = numberField(balanceReply?.balance);
@@ -299,63 +350,20 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       throw new Error("Could not verify the broker balance and currency.");
     }
 
-    if (!/^VRTC\d+$/i.test(accountId)) {
-      json(res, 403, { error: "This endpoint only permits broker-verified Deriv virtual accounts." });
-      return;
-    }
-
-    account = {
+    const account: DemoAccount = {
       loginid: accountId,
-      is_virtual: 1,
+      is_virtual: kind === "demo" ? 1 : 0,
       currency,
       balance: brokerBalance,
     };
 
     const portfolio = authReplies[1] as unknown as { portfolio?: { contracts?: Array<unknown> } };
-    const openContracts = Array.isArray(portfolio.portfolio?.contracts) ? portfolio.portfolio.contracts.length : 0;
+    if (!Array.isArray(portfolio.portfolio?.contracts)) throw new Error("Broker portfolio is unavailable; fail closed.");
+    const openContracts = portfolio.portfolio.contracts.length;
 
     const profits = authReplies[2] as unknown as { profit_table?: { transactions?: Array<Record<string, unknown>> } };
-    const transactions = profits.profit_table?.transactions;
-    if (!Array.isArray(transactions)) throw new Error("Broker profit history is unavailable; fail closed.");
-    if (transactions.length >= 500) {
-      throw new Error("Broker history reached the query limit; risk totals may be incomplete, so demo orders are disabled.");
-    }
-    if (transactions.some((transaction) =>
-      numberField(transaction.sell_time) === null ||
-      numberField(transaction.profit) === null ||
-      typeof (transaction.underlying ?? transaction.symbol) !== "string"
-    )) {
-      throw new Error("Broker history is missing timestamps, P&L, or market identifiers; risk accounting is incomplete, so demo orders are disabled.");
-    }
-
-    const today = todayStartUnix();
-    const dailyNetPnl = transactions.reduce((sum, transaction) => {
-      const sellTime = numberField(transaction.sell_time);
-      const profit = numberField(transaction.profit);
-      return sellTime !== null && sellTime >= today && profit !== null ? sum + profit : sum;
-    }, 0);
-
-    const marketTransactions = transactions.filter((transaction) =>
-      String(transaction.underlying ?? transaction.symbol ?? "") === symbol
-    );
-    if (marketTransactions.some((transaction) =>
-      numberField(transaction.sell_time) === null || numberField(transaction.profit) === null
-    )) {
-      throw new Error("Market-specific broker history is incomplete; demo orders are disabled.");
-    }
-
-    const marketNetPnl = marketTransactions.reduce((sum, transaction) => {
-      const sellTime = numberField(transaction.sell_time);
-      const profit = numberField(transaction.profit);
-      return sellTime !== null && sellTime >= today && profit !== null ? sum + profit : sum;
-    }, 0);
-
-    const sessionStart = Math.floor(Date.now() / 1000) - 4 * 60 * 60;
-    const sessionNetPnl = transactions.reduce((sum, transaction) => {
-      const sellTime = numberField(transaction.sell_time);
-      const profit = numberField(transaction.profit);
-      return sellTime !== null && sellTime >= sessionStart && profit !== null ? sum + profit : sum;
-    }, 0);
+    const totals = computeRiskTotals(profits.profit_table?.transactions, symbol);
+    const { dailyNetPnl, marketNetPnl, sessionNetPnl } = totals;
 
     const configuredLoss = Number(process.env.DERIV_DAILY_LOSS_LIMIT_USD ?? 20);
     const configuredTarget = Number(process.env.DERIV_DAILY_PROFIT_TARGET_USD ?? 40);
@@ -366,39 +374,33 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
         const value = parsed[symbol];
         return typeof value === "number" && Number.isFinite(value) ? value : configuredLoss;
       } catch {
-        throw new Error("DERIV_MARKET_LOSS_LIMITS_JSON is invalid; demo orders are disabled.");
+        throw new Error("DERIV_MARKET_LOSS_LIMITS_JSON is invalid; orders are disabled.");
       }
     })();
     const configuredSessionLoss = Number(process.env.DERIV_SESSION_LOSS_LIMIT_USD ?? configuredLoss);
 
-    const risk = evaluateDemoExecutionRisk({
-      account, stake, dailyNetPnl, marketNetPnl, sessionNetPnl,
-      dailyLossLimitUsd: configuredLoss, marketLossLimitUsd: configuredMarketLimits,
-      sessionLossLimitUsd: configuredSessionLoss, dailyProfitTargetUsd: configuredTarget,
-      riskPercent: 1, openContracts, maxOpenContracts: 1,
-    });
+    let risk;
+    if (realConfig) {
+      const demoOrdersConfirmed = Number((await redisCommand<string>(["GET", DEMO_COUNTER_KEY])) ?? 0);
+      risk = evaluateRealExecutionRisk({
+        account, stake, dailyNetPnl, openContracts, maxOpenContracts: 1, config: realConfig,
+        confirmation: body.realMoneyConfirmation, demoOrdersConfirmed,
+      });
+    } else {
+      risk = evaluateDemoExecutionRisk({
+        account, stake, dailyNetPnl, marketNetPnl, sessionNetPnl,
+        dailyLossLimitUsd: configuredLoss, marketLossLimitUsd: configuredMarketLimits,
+        sessionLossLimitUsd: configuredSessionLoss, dailyProfitTargetUsd: configuredTarget,
+        riskPercent: 1, openContracts, maxOpenContracts: 1,
+      });
+    }
 
     if (!risk.allowed) {
       json(res, 423, { error: "Risk checks blocked this order.", reasons: risk.reasons, maxStake: risk.maxStake, dailyNetPnl });
       return;
     }
 
-    const storagePrefix = `butcher:demo:${account.loginid}`;
-    const idempotencyKey = storagePrefix + ":idempotency:" + requestId;
-    const previous = await redisCommand<string>(["GET", idempotencyKey]);
-    if (previous) {
-      json(res, 409, { ...JSON.parse(previous), replayed: true, message: "This request key was already used; reconcile broker history before retrying." });
-      return;
-    }
-
-    const lockKey = storagePrefix + ":execution-lock";
-    const lockOwner = await acquireLock(lockKey);
-    if (!lockOwner) {
-      json(res, 423, { error: "Another order is being processed. Reconcile order history before retrying." });
-      return;
-    }
-
-    try {
+    {
       const markerValue = JSON.stringify({ status: "pending_reconciliation", requestId, symbol, contractType, stake, createdAt: new Date().toISOString() });
       const reserved = await redisCommand<string>(["SET", idempotencyKey, markerValue, "NX", "EX", 86400]);
       if (reserved !== "OK") {
@@ -410,7 +412,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       // were removed in the current API. Only the symbol is needed.
       const availabilityReply = await brokerRequest(session.accessToken, accountId, [
         { contracts_for: symbol },
-      ]);
+      ], kind);
       const available = availabilityReply[0]?.contracts_for?.available;
       if (!Array.isArray(available) || !available.some((item) => item.contract_type === contractType)) {
         json(res, 422, { error: "This contract type is not available for the selected market/account. Refresh contract discovery and choose an available type." });
@@ -459,16 +461,17 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
         }
       }
 
-      const proposal = await brokerRequest(session.accessToken, accountId, [proposalPayload]);
+      const proposal = await brokerRequest(session.accessToken, accountId, [proposalPayload], kind);
       const proposalData = proposal[0]?.proposal;
       if (!proposalData?.id || numberField(proposalData.ask_price) === null) {
         throw new Error("Broker proposal was incomplete; no buy request was sent.");
       }
 
       // loginid was removed from the buy request in the current API.
+      buySent = true;
       const buy = await brokerRequest(session.accessToken, accountId, [
         { buy: String(proposalData.id), price: stake },
-      ]);
+      ], kind);
       const receipt = buy[0]?.buy;
       if (!receipt?.contract_id || numberField(receipt.buy_price) === null) {
         throw new Error("Broker buy receipt was not confirmed. Reconcile account history before retrying.");
@@ -476,7 +479,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
 
       const result = {
         status: "open",
-        mode: "demo",
+        mode: kind,
         account: account.loginid,
         contractId: receipt.contract_id,
         transactionId: receipt.transaction_id ?? null,
@@ -494,21 +497,22 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
         dailyNetPnlAtEntry: dailyNetPnl,
         submittedAt: new Date().toISOString(),
         brokerConfirmed: true,
-        liveTradingEnabled: false,
+        liveTradingEnabled: kind === "real",
       };
 
       await redisCommand(["SET", `${storagePrefix}:idempotency:${requestId}`, JSON.stringify(result), "EX", 86400]);
       await redisCommand(["SET", `${storagePrefix}:contract:${receipt.contract_id}`, JSON.stringify(result), "EX", 604800]);
+      if (kind === "demo") await redisCommand(["INCR", DEMO_COUNTER_KEY]).catch(() => null); // evidence for the real-money gate
       json(res, 201, result);
-    } finally {
-      await releaseLock(lockKey, lockOwner).catch(() => null);
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Demo execution failed closed.";
+    const message = error instanceof Error ? error.message : "Order execution failed closed.";
     json(res, 503, {
       error: message,
-      noRetryUntilReconciled: message.includes("timed out") || message.includes("status must be reconciled"),
+      noRetryUntilReconciled: buySent || message.includes("timed out") || message.includes("status must be reconciled"),
       liveTradingEnabled: false,
     });
+  } finally {
+    if (lock) await releaseLock(lock.key, lock.owner).catch(() => null);
   }
 }

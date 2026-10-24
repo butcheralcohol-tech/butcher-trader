@@ -1,3 +1,4 @@
+import { classifyAccount } from "../../shared/account-kind.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { WebSocket } from "ws";
 import { OAUTH_COOKIE, decryptSession, parseCookies } from "../../shared/oauth-session.js";
@@ -142,7 +143,7 @@ async function requestContract(
     }
 
     // Derive account metadata from the OTP response rather than an authorize reply.
-    const accountIsVirtual = /^VRTC\d+$/i.test(accountId);
+    const accountIsVirtual = classifyAccount(accountId) === "demo";
     return { status, loginid: accountId, isVirtual: accountIsVirtual };
   } finally {
     try {
@@ -173,7 +174,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
   // For backward compatibility we accept it as a query parameter, but the
   // caller must still own the contract in the ledger below.
   const requestUrl = new URL(req.url ?? "/", "https://internal.invalid");
-  const accountId = requestUrl.searchParams.get("accountId")?.trim() ?? "";
+  const accountId = (requestUrl.searchParams.get("accountId")?.trim() ?? "").toUpperCase();
   if (!accountId || !/^[A-Z]{2,4}\d+$/i.test(accountId)) {
     json(res, 400, { error: "A valid accountId is required." });
     return;
@@ -193,25 +194,23 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       contractId,
     );
 
-    if (!isVirtual) {
-      json(res, 403, {
-        error: "Contract reconciliation is restricted to the demo account.",
-        liveTradingEnabled: false,
-      });
+    const kind = classifyAccount(loginid);
+    if (kind === "unsupported" || (kind === "demo") !== isVirtual) {
+      json(res, 403, { error: "Contract reconciliation is only available for demo and real trading accounts.", liveTradingEnabled: false });
       return;
     }
 
-    const key = `butcher:demo:${loginid}:contract:${contractId}`;
+    const key = `butcher:${kind}:${loginid}:contract:${contractId}`;
     const stored = await redisCommand<string>(["GET", key]);
     if (!stored) {
       json(res, 404, {
-        error: "This contract is not in the application's demo order ledger.",
+        error: "This contract is not in the application's order ledger.",
       });
       return;
     }
 
     const previous = JSON.parse(stored) as Record<string, unknown>;
-    if (previous.account !== loginid || previous.mode !== "demo") {
+    if (previous.account !== loginid || previous.mode !== kind) {
       json(res, 403, { error: "Contract/account ownership could not be verified." });
       return;
     }
@@ -236,7 +235,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       settlementSource: "deriv_proposal_open_contract",
       reconciledAt: new Date().toISOString(),
       brokerConfirmed: true,
-      liveTradingEnabled: false,
+      liveTradingEnabled: kind === "real",
     };
 
     await redisCommand(["SET", key, JSON.stringify(settlement), "EX", 604800]);

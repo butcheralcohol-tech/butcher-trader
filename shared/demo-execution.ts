@@ -1,3 +1,4 @@
+import { classifyAccount } from "./account-kind.js";
 export type DemoAccount = {
   loginid: string;
   is_virtual: 1 | 0;
@@ -45,7 +46,7 @@ export function evaluateDemoExecutionRisk(input: ExecutionRiskInput): ExecutionR
     input.dailyProfitTargetUsd, input.riskPercent, input.openContracts, input.maxOpenContracts,
     marketLossLimitUsd, sessionLossLimitUsd];
   if (!numeric.every(Number.isFinite)) reasons.push("Risk inputs must be finite.");
-  if (input.account.is_virtual !== 1 || !/^VRTC\d+$/.test(input.account.loginid)) {
+  if (input.account.is_virtual !== 1 || classifyAccount(input.account.loginid) !== "demo") {
     reasons.push("Only a broker-verified Deriv virtual account is permitted.");
   }
   if (!input.account.currency || !/^[A-Z]{3,5}$/.test(input.account.currency)) reasons.push("Broker account currency is invalid.");

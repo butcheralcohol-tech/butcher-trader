@@ -335,3 +335,11 @@ button.ghost-btn{border-radius:6px!important;border-color:#344154!important;back
 footer{border-top:1px solid var(--bt-line);color:#627188;margin-top:28px;padding-top:14px;font:9px "DM Mono";letter-spacing:.5px}
 @media(max-width:1050px){.sidebar{width:200px}.main{width:calc(100% - 200px);padding:18px 14px}.dashboard-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.terminal-ribbon{gap:8px}.terminal-ribbon>div{padding:5px 8px}}
 @media(max-width:760px){.app-shell{display:block}.sidebar{display:none}.main{width:100%;padding:15px 12px}.topbar{gap:10px}.topbar h1{font-size:25px}.terminal-ribbon{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0}.terminal-ribbon>div{padding:8px!important;border-right:0;border-bottom:1px solid #202a38}.terminal-ribbon>div:nth-last-child(-n+2){border-bottom:0}.terminal-ribbon .ribbon-clock{display:none}.hero{padding:22px 18px;min-height:0}.hero-emblem{display:none}.hero h2{font-size:36px}.market-layout{grid-template-columns:1fr}.market-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px}.market-row{padding:8px;min-width:0}.market-name b{font-size:10px}.dashboard-tool-switch{overflow-x:auto;flex-wrap:nowrap}.dashboard-tool-switch button{white-space:nowrap}.section-heading{gap:8px;align-items:start}}
+
+/* v0.3 — account picker and real-account warning */
+.account-picker{margin:8px 0 12px;display:flex;flex-direction:column;gap:8px}
+.account-picker label{font:9px "DM Mono";color:#777780;display:flex;flex-direction:column;gap:8px}
+.account-picker select,.account-picker input{background:#151518;border:1px solid #323238;border-radius:2px;color:#eee;padding:10px 8px;font:11px "DM Mono";width:100%;min-width:0;outline:none}
+.account-picker.is-real select{border-color:#a7343b}
+.account-picker .risk-result code{background:#1b1114;padding:1px 5px}
+.safe-label.danger{color:#ed6069}

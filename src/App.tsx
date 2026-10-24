@@ -1,5 +1,6 @@
+import BrokerTrades from "./components/BrokerTrades";
 import { useMemo, useState } from "react";
-import { Activity, ArrowDownRight, ArrowUpRight, Crosshair, FileText, KeyRound, LockKeyhole, Radio, ShieldCheck, SlidersHorizontal } from "lucide-react";
+import { Activity, ArrowDownRight, ArrowUpRight, Crosshair, FileText, KeyRound, LockKeyhole, Radio, ShieldCheck, SlidersHorizontal, ScrollText } from "lucide-react";
 import { ema } from "../shared/indicators.js";
 import { GRANULARITIES } from "../shared/candles.js";
 import CandleChart, { type Marker } from "./components/CandleChart";
@@ -13,8 +14,8 @@ import { useLiveFeed } from "./hooks/useLiveFeed";
 import { clockSeconds, fmt } from "./lib/format";
 import { MARKETS } from "./lib/markets";
 
-type View = "overview" | "lab" | "paper" | "manual" | "account" | "risk";
-const titles: Record<View, string> = { overview: "Control room", lab: "Strategy lab", paper: "Paper trading", manual: "Manual desk", account: "Deriv connection", risk: "Risk controls" };
+type View = "overview" | "lab" | "paper" | "manual" | "trades" | "account" | "risk";
+const titles: Record<View, string> = { overview: "Control room", lab: "Strategy lab", paper: "Paper trading", manual: "Manual desk", trades: "Broker trades", account: "Deriv connection", risk: "Risk controls" };
 
 export default function App() {
   const [view, setView] = useState<View>(() => new URLSearchParams(window.location.search).get("view") === "account" ? "account" : "overview");
@@ -29,6 +30,7 @@ export default function App() {
       {nav("lab", "Strategy lab", <Crosshair size={17} />)}
       {nav("paper", "Paper trading", <FileText size={17} />, paper.session ? "RUN" : undefined)}
       {nav("manual", "Manual desk", <SlidersHorizontal size={17} />)}
+      {nav("trades", "Broker trades", <ScrollText size={17} />)}
       {nav("account", "Deriv connection", <KeyRound size={17} />)}
       {nav("risk", "Risk controls", <ShieldCheck size={17} />)}
       <div className="side-bottom"><div className="status-led" /><div><b>DEMO PROTOCOL</b><small>LIVE ORDERS DISABLED</small></div></div></aside>
@@ -37,7 +39,7 @@ export default function App() {
         <div><span className="ribbon-led" /> SYSTEM <b>OPERATIONAL</b></div>
         <div>ACCOUNT <b>VIRTUAL / DEMO</b></div>
         <div>RISK ENGINE <b>ARMED</b></div>
-        <div>EXECUTION <b className="ribbon-lock">LIVE LOCKED</b></div>
+        <div>EXECUTION <b className="ribbon-lock">REAL LOCKED BY DEFAULT</b></div>
         <div className="ribbon-clock">{new Date().toLocaleTimeString("en-GB", { hour12: false })} LOCAL</div>
       </section>
       <nav className="mobile-nav" aria-label="Sections">{(Object.keys(titles) as View[]).map(id => <button key={id} className={view === id ? "on" : ""} onClick={() => setView(id)}>{titles[id]}</button>)}</nav>
@@ -45,6 +47,7 @@ export default function App() {
       {view === "lab" && <StrategyLab />}
       {view === "paper" && <PaperTrading paper={paper} />}
       {view === "manual" && <ManualTrading />}
+      {view === "trades" && <BrokerTrades />}
       {view === "account" && <DerivConnection />}
       {view === "risk" && <><div className="section-heading"><div><div className="eyebrow">02 / CAPITAL PRESERVATION</div><h3>Risk engine</h3></div><span className="safe-label"><ShieldCheck size={14} /> CONSERVATIVE PRESET</span></div><RiskPanel /></>}
       <footer><span>BUTCHER TRADER <b>·</b> BUILD 0.2.0</span><span>STAY DISCIPLINED. NO GUARANTEED RETURNS.</span></footer>
@@ -52,13 +55,14 @@ export default function App() {
   </div>;
 }
 
-type DashboardTool = "manual" | "robot" | "strategies" | "risk" | "account";
+type DashboardTool = "manual" | "robot" | "trades" | "strategies" | "risk" | "account";
 const dashboardTools: { id: DashboardTool; label: string; description: string }[] = [
   { id: "manual", label: "Manual orders", description: "Practice LONG/SHORT entries and exits with virtual positions." },
   { id: "robot", label: "Robot / paper bot", description: "Run multiple strategy modules, set demo balance and loss/profit limits, and inspect the audit log." },
+  { id: "trades", label: "Trades", description: "Broker-confirmed trades for the selected demo or real account, reconciled against Deriv." },
   { id: "strategies", label: "Strategy lab", description: "Inspect and test the available signal strategies." },
   { id: "risk", label: "Risk controls", description: "Review capital-preservation rules before running a paper session." },
-  { id: "account", label: "Deriv account", description: "Review the account connection status. This does not unlock real-money execution." },
+  { id: "account", label: "Deriv account", description: "Review the account connection status. Real-money execution is locked by default and enabled only on the server." },
 ];
 
 function Overview({ paper }: { paper: ReturnType<typeof usePaper> }) {
@@ -88,6 +92,7 @@ function Overview({ paper }: { paper: ReturnType<typeof usePaper> }) {
       <p className="hint">{dashboardTools.find(tool => tool.id === dashboardTool)?.description}</p>
       {dashboardTool === "manual" && <ManualTrading />}
       {dashboardTool === "robot" && <PaperTrading paper={paper} />}
+      {dashboardTool === "trades" && <BrokerTrades />}
       {dashboardTool === "strategies" && <StrategyLab />}
       {dashboardTool === "risk" && <><div className="section-heading"><div><div className="eyebrow">CAPITAL PRESERVATION</div><h3>Risk engine</h3></div><span className="safe-label"><ShieldCheck size={14} /> CONSERVATIVE PRESET</span></div><RiskPanel /></>}
       {dashboardTool === "account" && <DerivConnection />}
