@@ -65,14 +65,57 @@ export default function ManualTrading() {
     "Connect Deriv to load market-specific contract availability.",
   );
 
+  // Discover the connected demo account from the OAuth session.
   useEffect(() => {
+    if (brokerAccount) return;
+    let active = true;
+    fetch("/api/deriv/session", { credentials: "same-origin", cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then(
+        (
+          data: {
+            connected?: boolean;
+            accounts?: Array<{ account_id?: string; currency?: string }>;
+            accountError?: string | null;
+          } | null,
+        ) => {
+          if (!active) return;
+          if (!data?.connected) {
+            setBrokerMessage("Connect Deriv before placing demo orders.");
+            return;
+          }
+          const demo = data.accounts?.find((a) => /^VRTC|^DOT/i.test(a.account_id ?? ""));
+          if (demo?.account_id) {
+            setBrokerAccount(demo.account_id);
+            setBrokerMessage(
+              `Deriv virtual account ${demo.account_id} ready for demo orders.`,
+            );
+          } else if (data.accountError) {
+            setBrokerMessage(data.accountError);
+          } else {
+            setBrokerMessage(
+              "No Deriv virtual account found for this session. Connect a demo account.",
+            );
+          }
+        },
+      )
+      .catch(() => {
+        if (active) setBrokerMessage("Could not read Deriv session status.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [brokerAccount]);
+
+  // Contract discovery: only fire once an account is known.
+  useEffect(() => {
+    if (!brokerAccount) return;
     let active = true;
     setDiscoveryMessage("Checking Deriv contract availability…");
-    const accountId = brokerAccount;
-    const url = accountId
-      ? `/api/deriv/contracts?symbol=${encodeURIComponent(symbol)}&accountId=${encodeURIComponent(accountId)}`
-      : `/api/deriv/contracts?symbol=${encodeURIComponent(symbol)}`;
-    fetch(url, { credentials: "same-origin", cache: "no-store" })
+    fetch(
+      `/api/deriv/contracts?symbol=${encodeURIComponent(symbol)}&accountId=${encodeURIComponent(brokerAccount)}`,
+      { credentials: "same-origin", cache: "no-store" },
+    )
       .then(async (response) => {
         const data = (await response.json()) as {
           error?: string;
@@ -117,19 +160,22 @@ export default function ManualTrading() {
   const selectedContract = BROKER_CONTRACTS.find((c) => c.value === contractType) ?? BROKER_CONTRACTS[0];
 
   const refreshBrokerOrders = async () => {
+    if (!brokerAccount) {
+      setBrokerMessage("Connect a Deriv virtual account before refreshing broker history.");
+      return;
+    }
     try {
-      const accountId = brokerAccount;
-      const url = accountId
-        ? `/api/deriv/trades?accountId=${encodeURIComponent(accountId)}`
-        : `/api/deriv/trades`;
-      const response = await fetch(url, { credentials: "same-origin", cache: "no-store" });
+      const response = await fetch(
+        `/api/deriv/trades?accountId=${encodeURIComponent(brokerAccount)}`,
+        { credentials: "same-origin", cache: "no-store" },
+      );
       const data = (await response.json()) as {
         error?: string;
         account?: string;
         trades?: Array<Record<string, unknown>>;
       };
       if (!response.ok) throw new Error(data.error || "Could not reconcile broker history.");
-      setBrokerAccount(data.account || "");
+      setBrokerAccount(data.account || brokerAccount);
       setBrokerOrders(Array.isArray(data.trades) ? data.trades : []);
       setBrokerMessage("Broker history refreshed. Contract statuses are reported from Deriv.");
     } catch (error) {
@@ -420,6 +466,7 @@ export default function ManualTrading() {
             className="manual-buy"
             disabled={
               brokerBusy ||
+              !brokerAccount ||
               !Number.isFinite(brokerStake) ||
               brokerStake <= 0 ||
               (selectedContract.barrier && !/^[0-9]$/.test(barrier)) ||
@@ -444,7 +491,7 @@ export default function ManualTrading() {
           {brokerAccount ? ` · Account ${brokerAccount}` : ""}
         </p>
         <div className="btn-row">
-          <button className="ghost-btn" disabled={brokerBusy} onClick={refreshBrokerOrders}>
+          <button className="ghost-btn" disabled={brokerBusy || !brokerAccount} onClick={refreshBrokerOrders}>
             Refresh broker-confirmed history
           </button>
         </div>
