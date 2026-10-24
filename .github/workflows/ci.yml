@@ -1,19 +1,74 @@
 name: CI
+
 on:
   push:
   pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   verify:
+    name: Verify (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [20, 22]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          node-version: 20
-      - run: npm install
-      - run: npm test
-      - run: npm run typecheck
-      - run: npm run build
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
       - name: Dependency audit (informational)
         run: npm audit --audit-level=high
         continue-on-error: true
+
+  deriv-safety:
+    name: Deriv server-side safety tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: verify
+    env:
+      NODE_ENV: test
+      # Dummy values only. Real tokens must never be in CI.
+      DERIV_APP_ID: "1089"
+      DERIV_TOKEN: "ci-placeholder-not-a-real-token"
+      DERIV_ACCOUNT_ID: "CR000000"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Deriv safety suite
+        run: npm run test:deriv-safety
