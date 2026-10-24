@@ -1,19 +1,39 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { advancePaper, combineStrategySignals, newSession, parseSession, queueManualPaperSignal, MAX_REPLAY } from "./paper.js";
+import {
+  advancePaper,
+  combineStrategySignals,
+  newSession,
+  parseSession,
+  queueManualPaperSignal,
+  MAX_REPLAY,
+} from "./paper.js";
 import { DEFAULT_SIM } from "./sim.js";
 import { defaultParams, emaCrossRsi } from "./strategy.js";
 import type { Candle } from "./types.js";
 
-const series = (n: number, start = 0): Candle[] => Array.from({ length: n }, (_, i) => {
-  const t = start + i, p = 100 + Math.sin(t / 6) * 4 + t * 0.02;
-  return { time: 1_700_000_000 + t * 60, open: p, high: p + 0.5, low: p - 0.5, close: p + 0.1 };
-});
-const metaBase = { symbol: "R_100", granularity: 60, strategyId: emaCrossRsi.id, params: defaultParams(emaCrossRsi), cfg: DEFAULT_SIM, startedAt: 0 };
+const series = (n: number, start = 0): Candle[] =>
+  Array.from({ length: n }, (_, i) => {
+    const t = start + i;
+    const p = 100 + Math.sin(t / 6) * 4 + t * 0.02;
+    return {
+      time: 1_700_000_000 + t * 60,
+      open: p,
+      high: p + 0.5,
+      low: p - 0.5,
+      close: p + 0.1,
+    };
+  });
+
+const metaBase = {
+  symbol: "R_100",
+  granularity: 60,
+  strategyId: emaCrossRsi.id,
+  params: defaultParams(emaCrossRsi),
+  cfg: DEFAULT_SIM,
+  startedAt: 0,
+};
 const meta = metaBase;
-
-
-
 
 test("ensemble combines majority signals and rejects conflicting votes", () => {
   const votes = [
@@ -48,7 +68,7 @@ test("multi-strategy session records enabled modules and consensus settings", ()
   const meta = {
     ...metaBase,
     strategyIds: ids,
-    strategyParams: Object.fromEntries(ids.map(id => [id, {}])),
+    strategyParams: Object.fromEntries(ids.map((id) => [id, {}])),
     consensusPercent: 60,
   };
   const session = newSession(meta, 1000);
@@ -58,7 +78,6 @@ test("multi-strategy session records enabled modules and consensus settings", ()
   assert.ok(session.state.events[0].message.includes("60% directional consensus"));
   assert.ok(parseSession(JSON.parse(JSON.stringify(session))));
 });
-
 
 test("first call only records the starting point and never trades on history", () => {
   const s = advancePaper(newSession(meta, 1000), series(300));
@@ -76,7 +95,7 @@ test("re-feeding the same candles (e.g. after a reconnect) is a no-op", () => {
 test("each new closed candle is processed exactly once", () => {
   let s = advancePaper(newSession(meta, 1000), series(300));
   for (let n = 301; n <= 340; n++) s = advancePaper(s, series(n));
-  const ids = s.state.trades.map(t => t.id);
+  const ids = s.state.trades.map((t) => t.id);
   assert.equal(new Set(ids).size, ids.length);
   assert.equal(s.state.lastCandleTime, series(340).at(-1)!.time);
 });
@@ -84,7 +103,7 @@ test("each new closed candle is processed exactly once", () => {
 test("a large feed gap skips new entries but is logged", () => {
   const started = advancePaper(newSession(meta, 1000), series(300));
   const gap = advancePaper(started, series(300 + MAX_REPLAY + 5));
-  assert.ok(gap.state.events.some(e => e.message.includes("Feed gap")));
+  assert.ok(gap.state.events.some((e) => e.message.includes("Feed gap")));
   assert.equal(gap.state.pending, null);
 });
 
